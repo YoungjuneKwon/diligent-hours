@@ -1,0 +1,11 @@
+# Rust / Tauri build output
+/src-tauri/target/
+
+# Node (사용하지 않지만 혹시 모를 로컬 도구 대비)
+node_modules/
+
+# OS
+.DS_Store
+
+# Logs
+*.log

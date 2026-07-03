@@ -1,0 +1,29 @@
+[package]
+name = "diligent-hours"
+version = "0.1.0"
+description = "DiligentHours — 첫 입력 감지 기반 근무시간 카운트다운"
+edition = "2021"
+
+[lib]
+name = "diligent_hours_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rdev = "0.5"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+panic = "abort"
