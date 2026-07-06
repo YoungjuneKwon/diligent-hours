@@ -23,18 +23,28 @@ body.floating-body {
   cursor: default;
 }
 
-body.floating-body #container {
+/* 배경색(RGB)·불투명도는 설정에서 온 값을 JS 가 CSS 변수로 주입한다.
+   기본값 = 기존 rgb(15,23,42) @ 0.85. */
+body.floating-body {
+  --dh-bg-rgb: 15, 23, 42;
   --opacity: 0.85;
+}
+
+body.floating-body #container {
   --font-size: 30px;
-  /* 컴팩트 카드 높이(110px)에 고정 — 창이 팝오버로 커져도 시간 위치가 유지된다.
-     (요구사항 3: 창이 확장돼도 시간은 "제자리"에 있어야 함) */
-  width: 100vw;
+  /* 팝오버가 열리면 창이 카드+패널을 아우르도록 커진다. 카드는 자기 자리에 고정되어야
+     하므로 절대 배치하고, JS 가 배치별 (left,top,폭,높이) 를 인라인으로 지정한다.
+     기본(컴팩트)은 창 전체를 채우는 300x110. */
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 300px;
   height: 110px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 14px;
-  background: rgba(15, 23, 42, var(--opacity));
+  background: rgba(var(--dh-bg-rgb), var(--opacity));
   transition: background 0.3s ease;
 }
 
@@ -82,7 +92,7 @@ body.floating-body #container.finished #time {
    플로팅 창 — "⋯" 빠른 메뉴 버튼 + 팝오버 패널
    ========================================================================== */
 body.floating-body #menu-btn {
-  position: fixed;
+  position: absolute;
   top: 4px;
   right: 6px;
   z-index: 20;
@@ -114,22 +124,23 @@ body.floating-body #menu-btn.open {
 }
 
 body.floating-body #popover {
-  position: fixed;
-  top: 30px;
-  left: 8px;
-  right: 8px;
+  position: absolute;
+  left: 0;
+  top: 0;
   z-index: 15;
-  padding: 10px 12px 12px;
+  width: 260px;
+  padding: 5px 6px 6px;
   border-radius: 12px;
-  background: rgba(15, 23, 42, 0.97);
+  /* 카드와 동일한 배경색을 쓰되 가독성을 위해 약간 더 진하게(불투명도 하한 보정). */
+  background: rgba(var(--dh-bg-rgb), min(1, calc(var(--opacity) + 0.12)));
   border: 1px solid rgba(148, 163, 184, 0.18);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   color: #e2e8f0;
   font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif;
   font-size: 12px;
   -webkit-app-region: no-drag;
-  /* 컨트롤이 늘어나도 창 밖으로 잘리지 않게 스크롤 (확장 창 높이보다 커지면) */
-  max-height: calc(100vh - 38px);
+  /* 컨트롤이 화면보다 커지면 스크롤 (배치가 완전히 안 맞을 때의 폴백) */
+  max-height: calc(100vh - 12px);
   overflow-y: auto;
 }
 
@@ -138,7 +149,7 @@ body.floating-body #popover[hidden] {
 }
 
 body.floating-body .pop-section {
-  margin-bottom: 10px;
+  margin-bottom: 5px;
 }
 
 body.floating-body .pop-section:last-child {
@@ -149,24 +160,24 @@ body.floating-body .pop-label {
   font-size: 11px;
   font-weight: 700;
   color: #94a3b8;
-  margin-bottom: 5px;
+  margin-bottom: 3px;
 }
 
 body.floating-body .pop-row {
   display: flex;
-  gap: 10px;
+  gap: 5px;
 }
 
 body.floating-body .pop-row label {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   color: #cbd5e1;
 }
 
 body.floating-body #popover input[type="number"] {
   width: 52px;
-  padding: 4px 6px;
+  padding: 2px 3px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 6px;
   background: rgba(2, 6, 23, 0.6);
@@ -177,12 +188,12 @@ body.floating-body #popover input[type="number"] {
 
 body.floating-body .pop-seg {
   display: flex;
-  gap: 6px;
+  gap: 3px;
 }
 
 body.floating-body .seg-btn {
   flex: 1;
-  padding: 6px 8px;
+  padding: 3px 4px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 7px;
   background: rgba(2, 6, 23, 0.5);
@@ -206,12 +217,12 @@ body.floating-body .seg-btn[aria-checked="true"] {
 body.floating-body .pop-actions {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 4px;
 }
 
 body.floating-body .pop-btn {
   width: 100%;
-  padding: 7px 10px;
+  padding: 4px 5px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 7px;
   background: rgba(2, 6, 23, 0.5);
@@ -239,13 +250,13 @@ body.floating-body .pop-btn.danger:hover {
 body.floating-body .pop-btn-inline {
   width: auto;
   flex: 0 0 auto;
-  padding: 4px 12px;
+  padding: 2px 6px;
   margin-left: auto;
 }
 
 /* 종료 시각 도움말 (작고 흐리게) */
 body.floating-body .pop-hint {
-  margin-top: 5px;
+  margin-top: 3px;
   font-size: 10px;
   color: #64748b;
   line-height: 1.4;
@@ -253,8 +264,8 @@ body.floating-body .pop-hint {
 
 /* 종료 섹션 — 구분선으로 시각적 분리 */
 body.floating-body .pop-quit-section {
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: 5px;
+  padding-top: 5px;
   border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
 

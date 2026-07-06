@@ -44,6 +44,16 @@ pub struct Settings {
     pub autostart: bool,
     /// 플로팅 창 저장 위치 (물리 좌표)
     pub floating_pos: Option<(i32, i32)>,
+    /// 플로팅 창 배경 색상 (hex, 예 "#0f172a"). floating_opacity 와 함께 카드 배경에 적용.
+    #[serde(default = "default_floating_bg_color")]
+    pub floating_bg_color: String,
+    /// 마지막으로 적용한 "종료 시각 지정" 값 ("HH:MM"). 재시작 후 팝오버 프리필용.
+    #[serde(default)]
+    pub last_target: Option<String>,
+}
+
+fn default_floating_bg_color() -> String {
+    "#0f172a".to_string()
 }
 
 impl Default for Settings {
@@ -59,6 +69,8 @@ impl Default for Settings {
             notify_sound: false,
             autostart: false,
             floating_pos: None,
+            floating_bg_color: default_floating_bg_color(),
+            last_target: None,
         }
     }
 }
@@ -73,7 +85,24 @@ impl Settings {
         self.floating_opacity = self.floating_opacity.clamp(0.15, 1.0);
         self.font_size_px = self.font_size_px.clamp(16, 64);
         self.work_duration_secs = self.work_duration_secs.min(24 * 3600);
+        // 배경 색상: "#rgb" 또는 "#rrggbb" 형태만 허용, 아니면 기본값으로.
+        if !is_valid_hex_color(&self.floating_bg_color) {
+            self.floating_bg_color = default_floating_bg_color();
+        }
     }
+}
+
+/// "#rgb" 또는 "#rrggbb" (16진수) 형태인지 검사.
+fn is_valid_hex_color(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() || bytes[0] != b'#' {
+        return false;
+    }
+    let hex = &bytes[1..];
+    if hex.len() != 3 && hex.len() != 6 {
+        return false;
+    }
+    hex.iter().all(|b| b.is_ascii_hexdigit())
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +249,7 @@ pub struct StatusPayload {
     pub display_format: String,
     pub font_size_px: u32,
     pub floating_opacity: f64,
+    pub floating_bg_color: String,
 }
 
 /// 유효 종료 시각. "종료 시각 지정"(target_end)이 있으면 그것을,
@@ -287,6 +317,7 @@ pub fn build_payload(data: &AppData, now: DateTime<Local>) -> StatusPayload {
         display_format: data.settings.display_format.clone(),
         font_size_px: data.settings.font_size_px,
         floating_opacity: data.settings.floating_opacity,
+        floating_bg_color: data.settings.floating_bg_color.clone(),
     }
 }
 
@@ -385,7 +416,7 @@ pub fn manual_reset(app: &AppHandle, now: DateTime<Local>) {
 /// "종료 시각 지정": 오늘 로컬 날짜의 hour:minute:00 을 종료 시각으로 설정한다.
 /// start_time 이 없으면 now 를 기준 시작점으로 삼고, now >= target 이면 즉시 FINISHED.
 pub fn set_target_time(app: &AppHandle, now: DateTime<Local>, hour: u32, minute: u32) {
-    let (finished_now, notify_toast) = {
+    let (finished_now, notify_toast, updated_settings) = {
         let state = app.state::<AppState>();
         let mut data = lock_data(&state.data);
         let today = today_string(&now);
@@ -414,11 +445,19 @@ pub fn set_target_time(app: &AppHandle, now: DateTime<Local>, hour: u32, minute:
             Phase::Running
         };
         save_state(&data.config_dir, &data.session);
+        // 재시작 후 팝오버 프리필용으로 마지막 종료 시각(입력값)을 기억한다.
+        data.settings.last_target = Some(format!("{:02}:{:02}", hour.min(23), minute.min(59)));
+        save_settings(&data.config_dir, &data.settings);
         // 즉시 FINISHED 로 진입한 경우(이전이 FINISHED 가 아니었을 때만) 부수효과를 낸다.
         // tick 은 RUNNING→FINISHED 전이만 감지하므로 이 경로는 tick 이 놓친다.
         let finished_now = !was_finished && data.session.state == Phase::Finished;
-        (finished_now, data.settings.notify_toast)
+        // 열려 있는 설정 창이 낡은 last_target 스냅샷을 들고 있다가 저장 시 방금
+        // 기록한 값을 덮어쓰지 않도록, set_settings 와 동일하게 갱신된 설정을 브로드캐스트한다.
+        (finished_now, data.settings.notify_toast, data.settings.clone())
     };
+    if let Err(e) = app.emit("settings-changed", &updated_settings) {
+        eprintln!("[diligent-hours] settings-changed emit 실패: {e}");
+    }
     // 즉시 FINISHED 진입 시 duration 기반 종료와 동일하게 finished 이벤트/토스트/사운드를 낸다.
     if finished_now {
         emit_finished(app, notify_toast);

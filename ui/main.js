@@ -35,11 +35,21 @@
   let currentSettings = null;
   let popoverOpen = false;
 
-  // 컴팩트/확장 창 크기 (tauri.conf.json 의 300x110 기준)
-  const COMPACT_SIZE = { w: 300, h: 110 };
-  const EXPANDED_SIZE = { w: 300, h: 420 };
+  // 팝오버 배치용 지오메트리 상수 (LOGICAL px). tauri.conf.json 의 300x110 카드 기준.
+  const CARD_W = 300;
+  const CARD_H = 110;
+  const GAP = 6;
+  const PANEL_W = 260; // #popover 폭(style.css)과 일치
+  const PANEL_H = 320; // 여백 축소 후의 패널 자연 높이 근사; 초과 시 패널 스크롤 폴백
 
   const LogicalSize = tauriWindow.LogicalSize;
+  const PhysicalPosition = tauriWindow.PhysicalPosition;
+
+  // 프로그램적 창 이동/리사이즈 중에는 onMoved 저장을 건너뛴다(팝오버 확장/복원이
+  // 플로팅 위치로 저장되지 않게). 실제 사용자 드래그(팝오버 닫힘)만 저장한다.
+  let programmaticMove = false;
+  // 팝오버가 창 top-left 를 바꾼 경우(LEFT/UP) 닫을 때 복원할 원래 물리 좌표.
+  let restoreCardOrigin = null;
 
   function clampInt(value, min, max, fallback) {
     const n = parseInt(value, 10);
@@ -63,18 +73,37 @@
     return h + ":" + m + ":" + s;
   }
 
-  function applyStyle(fontSizePx, floatingOpacity) {
+  /** "#rgb"/"#rrggbb" → "r, g, b" 문자열. 잘못되면 기본 슬레이트(15,23,42). */
+  function hexToRgbVar(hex) {
+    const fallback = "15, 23, 42";
+    if (typeof hex !== "string") return fallback;
+    let h = hex.trim().replace(/^#/, "");
+    if (h.length === 3) {
+      h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    }
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return fallback;
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return r + ", " + g + ", " + b;
+  }
+
+  function applyStyle(fontSizePx, floatingOpacity, floatingBgColor) {
     if (typeof floatingOpacity === "number") {
       containerEl.style.setProperty("--opacity", String(floatingOpacity));
+      document.body.style.setProperty("--opacity", String(floatingOpacity));
     }
     if (typeof fontSizePx === "number") {
       containerEl.style.setProperty("--font-size", fontSizePx + "px");
+    }
+    if (typeof floatingBgColor === "string" && floatingBgColor) {
+      document.body.style.setProperty("--dh-bg-rgb", hexToRgbVar(floatingBgColor));
     }
   }
 
   function render() {
     if (!status) return;
-    applyStyle(status.fontSizePx, status.floatingOpacity);
+    applyStyle(status.fontSizePx, status.floatingOpacity, status.floatingBgColor);
     containerEl.classList.remove("idle", "running", "finished");
     if (status.state === "running") {
       containerEl.classList.add("running");
@@ -131,6 +160,8 @@
   // -------------------------------------------------------------------
   let moveTimer = null;
   function onMoved(position) {
+    // 팝오버 확장/복원(프로그램적 이동)이나 팝오버가 열린 동안의 이동은 저장하지 않는다.
+    if (programmaticMove || popoverOpen) return;
     if (moveTimer) clearTimeout(moveTimer);
     moveTimer = setTimeout(function () {
       invoke("save_floating_pos", { x: position.x, y: position.y }).catch(function (e) {
@@ -142,14 +173,170 @@
   // -------------------------------------------------------------------
   // 빠른 메뉴(팝오버)
   // -------------------------------------------------------------------
-  function setWindowSize(w, h) {
+  /** #container(카드) 와 #popover(패널) 를 인라인으로 배치. 오프셋은 LOGICAL px. */
+  function placeElements(cardLeft, cardTop, panelLeft, panelTop) {
+    containerEl.style.left = cardLeft + "px";
+    containerEl.style.top = cardTop + "px";
+    popoverEl.style.left = panelLeft + "px";
+    popoverEl.style.top = panelTop + "px";
+  }
+
+  /** 카드를 창 전체(컴팩트)로 되돌린다. */
+  function resetCardToCompact() {
+    containerEl.style.left = "0px";
+    containerEl.style.top = "0px";
+  }
+
+  /** 팝오버가 열린 동안 카드 드래그를 비활성화(창이 커진 상태로 끌려가지 않게). */
+  function setCardDraggable(enabled) {
+    const dragEls = [containerEl, timeEl];
+    dragEls.forEach(function (elm) {
+      if (!elm) return;
+      if (enabled) {
+        elm.setAttribute("data-tauri-drag-region", "");
+      } else {
+        elm.removeAttribute("data-tauri-drag-region");
+      }
+    });
+  }
+
+  /** 팝오버를 카드 옆(우/좌/하/상)에 겹치지 않게 배치하고 창을 확장한다. */
+  async function expandForPopover() {
+    // 기본(폴백): 단순 RIGHT 배치 — 창 top-left 유지, 카드 (0,0), 패널 오른쪽.
+    const fallback = function () {
+      restoreCardOrigin = null;
+      if (LogicalSize) {
+        appWindow.setSize(new LogicalSize(CARD_W + GAP + PANEL_W, Math.max(CARD_H, PANEL_H)));
+      }
+      placeElements(0, 0, CARD_W + GAP, 0);
+    };
+
+    let outer, monitor;
     try {
-      if (!LogicalSize) return;
-      appWindow.setSize(new LogicalSize(w, h)).catch(function (e) {
-        console.error("setSize 실패:", e);
-      });
+      outer = await appWindow.outerPosition();
+      monitor = await appWindow.currentMonitor();
     } catch (e) {
-      console.error("setSize 예외:", e);
+      console.error("팝오버 배치 정보 조회 실패, RIGHT 폴백:", e);
+      fallback();
+      return;
+    }
+
+    const cardX = outer.x;
+    const cardY = outer.y;
+
+    if (!monitor) {
+      // 모니터 정보 없음 → fit 검사 없이 RIGHT.
+      programmaticMove = true;
+      try {
+        if (LogicalSize) {
+          await appWindow.setSize(new LogicalSize(CARD_W + GAP + PANEL_W, Math.max(CARD_H, PANEL_H)));
+        }
+      } catch (e) {
+        console.error("setSize 실패:", e);
+      }
+      restoreCardOrigin = null;
+      placeElements(0, 0, CARD_W + GAP, 0);
+      return;
+    }
+
+    const scale = monitor.scaleFactor || 1;
+    const monLeft = monitor.position.x;
+    const monTop = monitor.position.y;
+    const monRight = monitor.position.x + monitor.size.width;
+    const monBottom = monitor.position.y + monitor.size.height;
+
+    const rightW = CARD_W + GAP + PANEL_W;
+    const rightH = Math.max(CARD_H, PANEL_H);
+    const downW = Math.max(CARD_W, PANEL_W);
+    const downH = CARD_H + GAP + PANEL_H;
+
+    // 후보 배치: [RIGHT, LEFT, DOWN, UP] 순으로 첫 번째로 맞는 것을 선택.
+    const candidates = [
+      {
+        name: "RIGHT",
+        winX: cardX,
+        winY: cardY,
+        winW: rightW,
+        winH: rightH,
+        cardL: 0,
+        cardT: 0,
+        panelL: CARD_W + GAP,
+        panelT: 0,
+        fits: cardX + rightW * scale <= monRight && cardY + rightH * scale <= monBottom,
+      },
+      {
+        name: "LEFT",
+        winX: cardX - (PANEL_W + GAP) * scale,
+        winY: cardY,
+        winW: rightW,
+        winH: rightH,
+        cardL: PANEL_W + GAP,
+        cardT: 0,
+        panelL: 0,
+        panelT: 0,
+        fits: cardX - (PANEL_W + GAP) * scale >= monLeft && cardY + rightH * scale <= monBottom,
+      },
+      {
+        name: "DOWN",
+        winX: cardX,
+        winY: cardY,
+        winW: downW,
+        winH: downH,
+        cardL: 0,
+        cardT: 0,
+        panelL: 0,
+        panelT: CARD_H + GAP,
+        fits: cardY + downH * scale <= monBottom && cardX + downW * scale <= monRight,
+      },
+      {
+        name: "UP",
+        winX: cardX,
+        winY: cardY - (PANEL_H + GAP) * scale,
+        winW: downW,
+        winH: downH,
+        cardL: 0,
+        cardT: PANEL_H + GAP,
+        panelL: 0,
+        panelT: 0,
+        fits: cardY - (PANEL_H + GAP) * scale >= monTop && cardX + downW * scale <= monRight,
+      },
+    ];
+
+    let chosen = candidates.find(function (c) {
+      return c.fits;
+    });
+
+    if (!chosen) {
+      // 완전히 맞는 배치 없음 → RIGHT 로 두되 창을 모니터 안으로 클램프(카드 우선 보임).
+      chosen = candidates[0];
+      let wx = chosen.winX;
+      let wy = chosen.winY;
+      const wPhysW = chosen.winW * scale;
+      const wPhysH = chosen.winH * scale;
+      if (wx + wPhysW > monRight) wx = monRight - wPhysW;
+      if (wy + wPhysH > monBottom) wy = monBottom - wPhysH;
+      if (wx < monLeft) wx = monLeft;
+      if (wy < monTop) wy = monTop;
+      chosen = Object.assign({}, chosen, { winX: wx, winY: wy });
+    }
+
+    programmaticMove = true;
+    try {
+      const movesWindow = Math.round(chosen.winX) !== Math.round(cardX) || Math.round(chosen.winY) !== Math.round(cardY);
+      if (movesWindow && PhysicalPosition) {
+        await appWindow.setPosition(new PhysicalPosition(Math.round(chosen.winX), Math.round(chosen.winY)));
+        // 닫을 때 카드를 원래 자리로 되돌리기 위해 원점 저장.
+        restoreCardOrigin = { x: cardX, y: cardY };
+      } else {
+        restoreCardOrigin = null;
+      }
+      if (LogicalSize) {
+        await appWindow.setSize(new LogicalSize(chosen.winW, chosen.winH));
+      }
+      placeElements(chosen.cardL, chosen.cardT, chosen.panelL, chosen.panelT);
+    } catch (e) {
+      console.error("팝오버 확장 실패, RIGHT 폴백:", e);
+      fallback();
     }
   }
 
@@ -165,17 +352,36 @@
     popFmtSeconds.setAttribute("aria-checked", isSeconds ? "true" : "false");
   }
 
-  /** 종료 시각 입력을 현재 유효 종료 시각(status.endTime)에서 채운다. 없으면 18:00. */
+  /** 종료 시각 입력을 채운다: lastTarget(영속) → status.endTime → 기본 18:00 순. */
   function syncTargetFromStatus() {
     let hour = 18;
     let minute = 0;
-    if (status && status.endTime) {
+    let filled = false;
+
+    // 1) 재시작 후에도 유지되는 마지막 지정값 ("HH:MM").
+    const src = currentSettings || settings;
+    if (src && typeof src.lastTarget === "string") {
+      const m = /^(\d{1,2}):(\d{1,2})$/.exec(src.lastTarget.trim());
+      if (m) {
+        const h = parseInt(m[1], 10);
+        const mi = parseInt(m[2], 10);
+        if (!Number.isNaN(h) && !Number.isNaN(mi)) {
+          hour = Math.min(23, Math.max(0, h));
+          minute = Math.min(59, Math.max(0, mi));
+          filled = true;
+        }
+      }
+    }
+
+    // 2) 없으면 현재 유효 종료 시각에서.
+    if (!filled && status && status.endTime) {
       const d = new Date(status.endTime);
       if (!Number.isNaN(d.getTime())) {
         hour = d.getHours();
         minute = d.getMinutes();
       }
     }
+
     popTargetHours.value = hour;
     popTargetMinutes.value = minute;
   }
@@ -195,24 +401,52 @@
     }
   }
 
-  function openPopover() {
+  async function openPopover() {
     if (popoverOpen) return;
     popoverOpen = true;
     syncPopoverFromSettings();
     syncTargetFromStatus();
-    setWindowSize(EXPANDED_SIZE.w, EXPANDED_SIZE.h);
+    // 패널을 먼저 보이게 해서 배치/스크롤이 자연스럽게 동작하도록.
     popoverEl.hidden = false;
     menuBtn.classList.add("open");
     menuBtn.setAttribute("aria-expanded", "true");
+    setCardDraggable(false);
+    try {
+      await expandForPopover();
+    } catch (e) {
+      console.error("openPopover 예외:", e);
+    }
+    // 이동/리사이즈가 정착한 뒤 onMoved 저장을 다시 허용.
+    setTimeout(function () {
+      programmaticMove = false;
+    }, 250);
   }
 
-  function closePopover() {
+  async function closePopover() {
     if (!popoverOpen) return;
     popoverOpen = false;
     popoverEl.hidden = true;
     menuBtn.classList.remove("open");
     menuBtn.setAttribute("aria-expanded", "false");
-    setWindowSize(COMPACT_SIZE.w, COMPACT_SIZE.h);
+
+    programmaticMove = true;
+    try {
+      if (LogicalSize) {
+        await appWindow.setSize(new LogicalSize(CARD_W, CARD_H));
+      }
+      // LEFT/UP 배치로 창을 옮겼다면 카드를 원래 물리 좌표로 복원.
+      if (restoreCardOrigin && PhysicalPosition) {
+        await appWindow.setPosition(new PhysicalPosition(restoreCardOrigin.x, restoreCardOrigin.y));
+      }
+    } catch (e) {
+      console.error("closePopover 복원 실패:", e);
+    }
+    restoreCardOrigin = null;
+    resetCardToCompact();
+    setCardDraggable(true);
+    setTimeout(function () {
+      programmaticMove = false;
+    }, 250);
   }
 
   function togglePopover() {
@@ -267,6 +501,12 @@
     invoke("set_target_time", { hour: hour, minute: minute }).catch(function (e) {
       console.error("set_target_time 실패:", e);
     });
+    // 백엔드도 lastTarget 을 영속화하지만, 같은 세션 내 재오픈 시 프리필이 즉시
+    // 반영되도록 캐시도 낙관적으로 갱신한다 ("HH:MM", zero-pad).
+    const hhmm =
+      String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0");
+    if (currentSettings) currentSettings.lastTarget = hhmm;
+    if (settings) settings.lastTarget = hhmm;
     const original = popTargetApplyBtn.textContent;
     popTargetApplyBtn.textContent = "적용됨";
     if (targetFeedbackTimer) clearTimeout(targetFeedbackTimer);
@@ -358,11 +598,12 @@
     await listen("settings-changed", function (event) {
       settings = event.payload;
       currentSettings = settings;
-      applyStyle(settings.fontSizePx, settings.floatingOpacity);
+      applyStyle(settings.fontSizePx, settings.floatingOpacity, settings.floatingBgColor);
       if (status) {
         status.displayFormat = settings.displayFormat;
         status.fontSizePx = settings.fontSizePx;
         status.floatingOpacity = settings.floatingOpacity;
+        status.floatingBgColor = settings.floatingBgColor;
       }
       // 팝오버가 열려 있으면 외부 변경(트레이 토글 등)을 컨트롤에 반영
       if (popoverOpen) {

@@ -18,6 +18,17 @@
     return Math.min(max, Math.max(min, n));
   }
 
+  /** "#rgb"/"#rrggbb" 를 <input type=color> 가 요구하는 "#rrggbb" 로 정규화. 잘못되면 기본값. */
+  function normalizeHexColor(value) {
+    const fallback = "#0f172a";
+    if (typeof value !== "string") return fallback;
+    let hex = value.trim();
+    if (/^#[0-9a-fA-F]{3}$/.test(hex)) {
+      hex = "#" + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+    }
+    return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.toLowerCase() : fallback;
+  }
+
   function updateRangeLabels() {
     el("opacity-value").textContent = Number(el("opacity").value).toFixed(2);
     el("fontSize-value").textContent = el("fontSize").value + "px";
@@ -29,6 +40,7 @@
     el("minutes").value = Math.floor((total % 3600) / 60);
     (settings.displayFormat === "seconds" ? el("fmt-seconds") : el("fmt-hms")).checked = true;
     el("showFloating").checked = !!settings.showFloating;
+    el("bg-color").value = normalizeHexColor(settings.floatingBgColor);
     el("opacity").value = settings.floatingOpacity;
     el("fontSize").value = settings.fontSizePx;
     el("includeMouseMove").checked = !!settings.includeMouseMove;
@@ -46,6 +58,7 @@
     s.workDurationSecs = hours * 3600 + minutes * 60;
     s.displayFormat = el("fmt-seconds").checked ? "seconds" : "hms";
     s.showFloating = el("showFloating").checked;
+    s.floatingBgColor = normalizeHexColor(el("bg-color").value);
     s.floatingOpacity = Number(el("opacity").value);
     s.fontSizePx = clampInt(el("fontSize").value, 16, 64, 30);
     s.includeMouseMove = el("includeMouseMove").checked;
