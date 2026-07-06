@@ -35,6 +35,13 @@ pub fn set_settings(app: AppHandle, state: State<'_, AppState>, new_settings: Se
         // (설정 창이 열려 있는 동안 드래그로 위치가 바뀌면 프론트가 들고 있는
         //  floatingPos 는 낡은 값이므로, 들어온 값은 무시한다 — FR-5 위치 기억)
         new_settings.floating_pos = data.settings.floating_pos;
+        // 카운트다운 시간(workDuration) 을 바꾸면 "종료 시각 지정"(target_end) 오버라이드를
+        // 해제해 duration 기반 카운트다운으로 되돌린다. 그렇지 않으면 target_end 가
+        // 영구히 우선해 새 duration 이 조용히 무시된다(팝오버 시간 설정이 먹통처럼 보임).
+        if new_settings.work_duration_secs != data.settings.work_duration_secs {
+            data.session.target_end = None;
+            session::save_state(&data.config_dir, &data.session);
+        }
         data.settings = new_settings.clone();
         session::save_settings(&data.config_dir, &data.settings);
     }
@@ -93,4 +100,17 @@ pub fn manual_start(app: AppHandle) {
 #[tauri::command]
 pub fn manual_reset(app: AppHandle) {
     session::manual_reset(&app, Local::now());
+}
+
+/// "종료 시각 지정" — 오늘 hour:minute 까지 남은 시간으로 카운트다운을 맞춘다.
+/// 프론트엔드: invoke('set_target_time', { hour, minute })
+#[tauri::command]
+pub fn set_target_time(app: AppHandle, hour: u32, minute: u32) {
+    session::set_target_time(&app, Local::now(), hour, minute);
+}
+
+/// 앱 종료 — 팝오버/트레이 "종료" 공용. 커스텀 커맨드라 capability 항목 불필요.
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
 }

@@ -147,6 +147,8 @@ pub fn run() {
             commands::save_floating_pos,
             commands::manual_start,
             commands::manual_reset,
+            commands::set_target_time,
+            commands::quit_app,
         ])
         .on_window_event(|window, event| {
             // 플로팅 창 닫기 = 숨기기. 종료는 트레이 "종료" 메뉴에서만.

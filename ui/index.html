@@ -6,10 +6,52 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="floating-body">
-  <!-- 전체 영역이 드래그 핸들 (플로팅 창 이동) -->
+  <!-- 전체 영역이 드래그 핸들 (플로팅 창 이동). 케밥 버튼/팝오버는 이 밖에 두어 드래그되지 않게 한다. -->
   <div id="container" class="idle" data-tauri-drag-region>
     <div id="time" data-tauri-drag-region>대기 중</div>
   </div>
+
+  <!-- "⋯" 빠른 메뉴 버튼 (드래그 영역 밖, 우상단 고정) -->
+  <button id="menu-btn" type="button" title="빠른 메뉴" aria-label="빠른 메뉴" aria-haspopup="true" aria-expanded="false">⋯</button>
+
+  <!-- 인-윈도우 팝오버 패널 -->
+  <div id="popover" hidden>
+    <div class="pop-section">
+      <div class="pop-label">카운트다운 시간 설정</div>
+      <div class="pop-row">
+        <label>시 <input id="pop-hours" type="number" min="0" max="23" step="1" inputmode="numeric" /></label>
+        <label>분 <input id="pop-minutes" type="number" min="0" max="59" step="1" inputmode="numeric" /></label>
+      </div>
+    </div>
+
+    <div class="pop-section">
+      <div class="pop-label">표시 방식</div>
+      <div class="pop-seg" role="radiogroup" aria-label="표시 방식">
+        <button id="pop-fmt-hms" type="button" class="seg-btn" role="radio" aria-checked="false">시:분:초</button>
+        <button id="pop-fmt-seconds" type="button" class="seg-btn" role="radio" aria-checked="false">초</button>
+      </div>
+    </div>
+
+    <div class="pop-section">
+      <div class="pop-label">종료 시각 지정</div>
+      <div class="pop-row">
+        <label>시 <input id="pop-target-hours" type="number" min="0" max="23" step="1" inputmode="numeric" /></label>
+        <label>분 <input id="pop-target-minutes" type="number" min="0" max="59" step="1" inputmode="numeric" /></label>
+        <button id="pop-target-apply" type="button" class="pop-btn pop-btn-inline">적용</button>
+      </div>
+      <div class="pop-hint">선택한 시각까지 남은 시간으로 맞춥니다.</div>
+    </div>
+
+    <div class="pop-section pop-actions">
+      <button id="pop-tray" type="button" class="pop-btn">트레이로 내리기</button>
+      <button id="pop-reset" type="button" class="pop-btn danger">초기화 (테스트용)</button>
+    </div>
+
+    <div class="pop-section pop-actions pop-quit-section">
+      <button id="pop-quit" type="button" class="pop-btn quit">종료</button>
+    </div>
+  </div>
+
   <script src="main.js"></script>
 </body>
 </html>

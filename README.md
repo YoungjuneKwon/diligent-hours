@@ -63,7 +63,8 @@ cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc
 
 ## 상태
 
-- **v0.1 구현 중** (기술 스택 확정: Tauri)
+- **v0.2.0 릴리스** — [GitHub Releases](https://github.com/YoungjuneKwon/diligent-hours/releases)
+- v0.2 추가: 플로팅 창 `⋯` 팝오버(카운트다운 시간·표시 방식·종료 시각 지정·트레이로 내리기·초기화·종료), 트레이 아이콘 남은 시간 파이차트, 표시 형식 정리(시:분:초 / 콤마 초)
 
 ## 라이선스
 

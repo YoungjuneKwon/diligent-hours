@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
-use chrono::{DateTime, Duration as ChronoDuration, Local};
+use chrono::{DateTime, Duration as ChronoDuration, Local, TimeZone};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -107,6 +107,10 @@ pub struct SessionState {
     /// 당일 첫 입력 시각 (RFC3339, chrono serde)
     pub start_time: Option<DateTime<Local>>,
     pub state: Phase,
+    /// "종료 시각 지정" 오버라이드. Some 이면 이 시각을 종료 시각으로 사용한다
+    /// (start_time + work_duration 대신). 구버전 state.json 호환을 위해 default=None.
+    #[serde(default)]
+    pub target_end: Option<DateTime<Local>>,
 }
 
 impl SessionState {
@@ -115,6 +119,7 @@ impl SessionState {
             date,
             start_time: None,
             state: Phase::Idle,
+            target_end: None,
         }
     }
 }
@@ -217,10 +222,54 @@ pub struct StatusPayload {
     pub floating_opacity: f64,
 }
 
+/// 유효 종료 시각. "종료 시각 지정"(target_end)이 있으면 그것을,
+/// 없으면 start_time + work_duration 을 쓴다. start_time 이 없으면 None.
 fn end_time_of(data: &AppData) -> Option<DateTime<Local>> {
+    if let Some(target) = data.session.target_end {
+        return Some(target);
+    }
     data.session
         .start_time
         .map(|start| start + ChronoDuration::seconds(data.settings.work_duration_secs as i64))
+}
+
+/// 파이 차트 분모(총 카운트다운 초). target_end 가 있으면 (end - start),
+/// 없으면 work_duration_secs. 0 이하이면 None(호출부에서 fraction 0 처리).
+fn total_secs_of(data: &AppData) -> Option<i64> {
+    if let (Some(target), Some(start)) = (data.session.target_end, data.session.start_time) {
+        let total = (target - start).num_seconds();
+        if total > 0 {
+            Some(total)
+        } else {
+            None
+        }
+    } else {
+        let total = data.settings.work_duration_secs as i64;
+        if total > 0 {
+            Some(total)
+        } else {
+            None
+        }
+    }
+}
+
+/// 정수를 3자리마다 콤마로 묶은 문자열 (예: 27939 → "27,939"). 크레이트 없이 직접 구성.
+fn group_thousands(n: i64) -> String {
+    let negative = n < 0;
+    let digits = n.unsigned_abs().to_string();
+    let bytes = digits.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(len + len / 3 + 1);
+    if negative {
+        out.push('-');
+    }
+    for (i, ch) in bytes.iter().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(*ch as char);
+    }
+    out
 }
 
 pub fn build_payload(data: &AppData, now: DateTime<Local>) -> StatusPayload {
@@ -249,12 +298,14 @@ pub fn format_remaining(settings: &Settings, phase: Phase, remaining_secs: i64) 
         Phase::Running => {
             let r = remaining_secs.max(0);
             if settings.display_format == "seconds" {
-                format!("{r}초 남음")
+                // 콤마로 3자리씩 묶은 초 (예: "27,939") — "초"/"남음" 없음.
+                group_thousands(r)
             } else {
+                // "HH:MM:SS" (예: "07:45:39") — "남음" 없음.
                 let h = r / 3600;
                 let m = (r % 3600) / 60;
                 let s = r % 60;
-                format!("{h:02}:{m:02}:{s:02} 남음")
+                format!("{h:02}:{m:02}:{s:02}")
             }
         }
     }
@@ -276,6 +327,7 @@ pub fn on_input(app: &AppHandle, now: DateTime<Local>) {
                 date: today,
                 start_time: Some(now),
                 state: Phase::Running,
+                target_end: None,
             };
             save_state(&data.config_dir, &data.session);
             true
@@ -330,9 +382,75 @@ pub fn manual_reset(app: &AppHandle, now: DateTime<Local>) {
     tick(app, now);
 }
 
+/// "종료 시각 지정": 오늘 로컬 날짜의 hour:minute:00 을 종료 시각으로 설정한다.
+/// start_time 이 없으면 now 를 기준 시작점으로 삼고, now >= target 이면 즉시 FINISHED.
+pub fn set_target_time(app: &AppHandle, now: DateTime<Local>, hour: u32, minute: u32) {
+    let (finished_now, notify_toast) = {
+        let state = app.state::<AppState>();
+        let mut data = lock_data(&state.data);
+        let today = today_string(&now);
+
+        // 날짜가 바뀌었으면 먼저 오늘 IDLE 로 정리.
+        if data.session.date != today {
+            data.session = SessionState::idle_for(today);
+        }
+
+        // 오늘 로컬 날짜의 hour:minute:00 을 target 으로. 실패/모호하면 now 로 폴백.
+        let target = now
+            .date_naive()
+            .and_hms_opt(hour.min(23), minute.min(59), 0)
+            .and_then(|naive| now.timezone().from_local_datetime(&naive).single())
+            .unwrap_or(now);
+
+        // 기준 시작점: 이미 시작됐으면 유지, 없으면 now.
+        if data.session.start_time.is_none() {
+            data.session.start_time = Some(now);
+        }
+        let was_finished = data.session.state == Phase::Finished;
+        data.session.target_end = Some(target);
+        data.session.state = if now >= target {
+            Phase::Finished
+        } else {
+            Phase::Running
+        };
+        save_state(&data.config_dir, &data.session);
+        // 즉시 FINISHED 로 진입한 경우(이전이 FINISHED 가 아니었을 때만) 부수효과를 낸다.
+        // tick 은 RUNNING→FINISHED 전이만 감지하므로 이 경로는 tick 이 놓친다.
+        let finished_now = !was_finished && data.session.state == Phase::Finished;
+        (finished_now, data.settings.notify_toast)
+    };
+    // 즉시 FINISHED 진입 시 duration 기반 종료와 동일하게 finished 이벤트/토스트/사운드를 낸다.
+    if finished_now {
+        emit_finished(app, notify_toast);
+    }
+    // 다른 전이(manual_start/manual_reset)와 동일하게 즉시 tick 으로 UI/트레이 갱신.
+    tick(app, now);
+}
+
+/// FINISHED 전이 부수효과: 프론트엔드 하이라이트/사운드용 "finished" 이벤트 + (옵션) OS 토스트.
+/// tick 의 RUNNING→FINISHED 전이와 set_target_time 의 즉시 FINISHED 전이가 공용으로 호출한다.
+fn emit_finished(app: &AppHandle, notify_toast: bool) {
+    // 프론트엔드: 하이라이트 + (옵션) 사운드
+    if let Err(e) = app.emit("finished", ()) {
+        eprintln!("[diligent-hours] finished 이벤트 emit 실패: {e}");
+    }
+    if notify_toast {
+        use tauri_plugin_notification::NotificationExt;
+        if let Err(e) = app
+            .notification()
+            .builder()
+            .title("DiligentHours")
+            .body("오늘의 근무 시간이 끝났습니다. 수고하셨습니다!")
+            .show()
+        {
+            eprintln!("[diligent-hours] 토스트 알림 실패: {e}");
+        }
+    }
+}
+
 /// 1초 주기 틱. 자정 롤오버 감지 → FINISHED 전이 → "tick" 이벤트 + 트레이 갱신.
 pub fn tick(app: &AppHandle, now: DateTime<Local>) {
-    let (payload, tray_text, is_finished, finished_now, notify_toast) = {
+    let (payload, tray_text, phase, fraction, finished_now, notify_toast) = {
         let state = app.state::<AppState>();
         let mut data = lock_data(&state.data);
         let today = today_string(&now);
@@ -363,37 +481,29 @@ pub fn tick(app: &AppHandle, now: DateTime<Local>) {
         let payload = build_payload(&data, now);
         let tray_text =
             format_remaining(&data.settings, data.session.state, payload.remaining_secs);
+        // 트레이 파이 차트용 남은 비율 = remaining / total (0..=1).
+        // total = target_end 지정 시 (end - start), 아니면 work_duration. total<=0 방어.
+        let fraction = match total_secs_of(&data) {
+            Some(total) => (payload.remaining_secs as f64 / total as f64).clamp(0.0, 1.0),
+            None => 0.0,
+        };
         (
             payload,
             tray_text,
-            data.session.state == Phase::Finished,
+            data.session.state,
+            fraction,
             finished_now,
             data.settings.notify_toast,
         )
     };
 
     if finished_now {
-        // 프론트엔드: 하이라이트 + (옵션) 사운드
-        if let Err(e) = app.emit("finished", ()) {
-            eprintln!("[diligent-hours] finished 이벤트 emit 실패: {e}");
-        }
-        if notify_toast {
-            use tauri_plugin_notification::NotificationExt;
-            if let Err(e) = app
-                .notification()
-                .builder()
-                .title("DiligentHours")
-                .body("오늘의 근무 시간이 끝났습니다. 수고하셨습니다!")
-                .show()
-            {
-                eprintln!("[diligent-hours] 토스트 알림 실패: {e}");
-            }
-        }
+        emit_finished(app, notify_toast);
     }
 
     if let Err(e) = app.emit("tick", &payload) {
         eprintln!("[diligent-hours] tick 이벤트 emit 실패: {e}");
     }
 
-    crate::tray::update_tray_text(app, &tray_text, is_finished);
+    crate::tray::update_tray(app, &tray_text, phase, fraction);
 }
