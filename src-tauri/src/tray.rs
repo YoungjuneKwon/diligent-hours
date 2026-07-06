@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 use chrono::Local;
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -22,6 +22,21 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         true,
         None::<&str>,
     )?;
+    // 워터마크 모드(체크 항목): 켜지면 플로팅 창이 클릭-스루가 된다.
+    // 초기 체크 상태는 현재 설정값을 따른다.
+    let watermark_on = {
+        let state = app.state::<AppState>();
+        let data = session::lock_data(&state.data);
+        data.settings.watermark_mode
+    };
+    let watermark = CheckMenuItem::with_id(
+        app,
+        "watermark",
+        "워터마크 모드",
+        true,
+        watermark_on,
+        None::<&str>,
+    )?;
     let start = MenuItem::with_id(app, "manual-start", "지금 시작", true, None::<&str>)?;
     let reset = MenuItem::with_id(app, "manual-reset", "오늘 리셋", true, None::<&str>)?;
     let sep1 = PredefinedMenuItem::separator(app)?;
@@ -30,14 +45,33 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
-        &[&toggle, &start, &reset, &sep1, &open_settings, &sep2, &quit],
+        &[
+            &toggle,
+            &watermark,
+            &start,
+            &reset,
+            &sep1,
+            &open_settings,
+            &sep2,
+            &quit,
+        ],
     )?;
+
+    // 토글 핸들러가 체크 상태를 동기화할 수 있도록 CheckMenuItem 핸들을 보관한다.
+    {
+        let state = app.state::<AppState>();
+        let locked = state.watermark_item.lock();
+        if let Ok(mut slot) = locked {
+            *slot = Some(watermark.clone());
+        }
+    }
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("DiligentHours — 대기 중")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "toggle-floating" => toggle_floating(app),
+            "watermark" => toggle_watermark(app),
             "manual-start" => session::manual_start(app, Local::now()),
             "manual-reset" => session::manual_reset(app, Local::now()),
             "open-settings" => open_settings_window(app),
@@ -266,6 +300,59 @@ fn toggle_floating(app: &AppHandle) {
         let _ = win.hide();
     }
     persist_floating_visibility(app, show);
+}
+
+/// 플로팅 창의 클릭-스루(마우스 이벤트 무시) 상태를 적용한다.
+/// 트레이 토글과 startup 복원이 공용으로 호출. 실패해도 panic 하지 않는다.
+pub fn apply_watermark(app: &AppHandle, enabled: bool) {
+    let Some(win) = app.get_webview_window("floating") else {
+        return;
+    };
+    if let Err(e) = win.set_ignore_cursor_events(enabled) {
+        eprintln!("[diligent-hours] set_ignore_cursor_events({enabled}) 실패: {e}");
+    }
+}
+
+/// 트레이 "워터마크 모드" 체크 항목 토글.
+/// 설정을 뒤집어 영속화하고, 플로팅 창에 클릭-스루를 적용하며, 체크 상태를
+/// 동기화하고, 프론트/설정 창에 변경을 알린다.
+fn toggle_watermark(app: &AppHandle) {
+    let (new_state, settings_clone) = {
+        let state = app.state::<AppState>();
+        let mut data = session::lock_data(&state.data);
+        let new_state = !data.settings.watermark_mode;
+        data.settings.watermark_mode = new_state;
+        session::save_settings(&data.config_dir, &data.settings);
+        (new_state, data.settings.clone())
+    };
+
+    // 클릭-스루 적용.
+    apply_watermark(app, new_state);
+
+    // 체크 항목 상태 동기화.
+    {
+        let state = app.state::<AppState>();
+        let locked = state.watermark_item.lock();
+        if let Ok(slot) = locked {
+            if let Some(item) = slot.as_ref() {
+                if let Err(e) = item.set_checked(new_state) {
+                    eprintln!("[diligent-hours] 워터마크 체크 상태 갱신 실패: {e}");
+                }
+            }
+        }
+    }
+
+    // 켜는 경우: 창이 클릭-스루가 되므로 열려 있는 "⋯" 팝오버가 갇힌다.
+    // 프론트는 payload==true 일 때 팝오버를 닫는다. 이벤트(IPC)는 클릭-스루와
+    // 무관하게 동작하므로 워터마크가 켜진 상태에서도 정상 수신된다.
+    if let Err(e) = app.emit("watermark-changed", new_state) {
+        eprintln!("[diligent-hours] watermark-changed emit 실패: {e}");
+    }
+
+    // 설정 창/플로팅 창이 상태를 반영하도록 settings-changed 브로드캐스트.
+    if let Err(e) = app.emit("settings-changed", &settings_clone) {
+        eprintln!("[diligent-hours] settings-changed emit 실패: {e}");
+    }
 }
 
 fn open_settings_window(app: &AppHandle) {

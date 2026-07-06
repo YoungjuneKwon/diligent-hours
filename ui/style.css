@@ -88,6 +88,14 @@ body.floating-body #container.finished #time {
   }
 }
 
+/* 워터마크 모드(클릭-스루) 활성 시 은은한 시각 큐 — 점선 테두리.
+   클릭-스루 자체는 백엔드 set_ignore_cursor_events 가 담당하므로 여기서는
+   pointer-events 를 절대 건드리지 않는다(알려진 broken 조합 회피). */
+body.floating-body.watermark #container {
+  outline: 1px dashed rgba(148, 163, 184, 0.35);
+  outline-offset: -2px;
+}
+
 /* ==========================================================================
    플로팅 창 — "⋯" 빠른 메뉴 버튼 + 팝오버 패널
    ========================================================================== */

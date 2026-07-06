@@ -659,6 +659,8 @@
       settings = await invoke("get_settings");
       currentSettings = settings;
       status = await invoke("get_status");
+      // 시작 시 워터마크 모드면 시각 큐 반영(클릭-스루 자체는 백엔드가 적용).
+      document.body.classList.toggle("watermark", !!(settings && settings.watermarkMode));
       render();
     } catch (e) {
       console.error("초기 상태 로드 실패:", e);
@@ -676,6 +678,19 @@
       if (settings && settings.notifySound) {
         playFinishBeep();
       }
+    });
+
+    await listen("watermark-changed", function (event) {
+      // 워터마크 모드가 켜지면 창이 클릭-스루가 되어 열린 팝오버가 갇힌다.
+      // 트레이에서 켠 순간 팝오버를 닫아 컴팩트 크기로 복원한다.
+      // (이벤트는 IPC라 클릭-스루 상태에서도 정상 수신된다.)
+      const on = event && event.payload === true;
+      if (on && popoverOpen) {
+        closePopover();
+      }
+      // 활성화 여부를 body 클래스로 표시(선택적 시각 큐). 클릭-스루는 백엔드의
+      // set_ignore_cursor_events 가 담당하므로 여기서 pointer-events 는 건드리지 않는다.
+      document.body.classList.toggle("watermark", on);
     });
 
     await listen("settings-changed", function (event) {

@@ -50,6 +50,10 @@ pub struct Settings {
     /// 마지막으로 적용한 "종료 시각 지정" 값 ("HH:MM"). 재시작 후 팝오버 프리필용.
     #[serde(default)]
     pub last_target: Option<String>,
+    /// 워터마크 모드: 켜지면 플로팅 창이 클릭-스루(마우스 이벤트 무시)가 되어
+    /// 뒤 창으로 클릭/드래그가 통과한다. 이 상태에서 유일한 제어는 트레이 메뉴.
+    #[serde(default)]
+    pub watermark_mode: bool,
 }
 
 fn default_floating_bg_color() -> String {
@@ -71,6 +75,7 @@ impl Default for Settings {
             floating_pos: None,
             floating_bg_color: default_floating_bg_color(),
             last_target: None,
+            watermark_mode: false,
         }
     }
 }

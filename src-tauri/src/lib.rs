@@ -25,6 +25,9 @@ pub struct AppState {
     pub data: Mutex<AppData>,
     /// hook 스레드가 lock 없이 읽는 "마우스 이동 트리거 인정" 플래그.
     pub include_mouse_move: Arc<AtomicBool>,
+    /// 트레이 "워터마크 모드" 체크 항목 핸들 — 토글 시 체크 상태 동기화용.
+    /// tray::build 에서 채워진다.
+    pub watermark_item: Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>,
 }
 
 pub fn run() {
@@ -107,6 +110,8 @@ pub fn run() {
                 }
             }
 
+            let watermark_mode = settings.watermark_mode;
+
             app.manage(AppState {
                 data: Mutex::new(AppData {
                     settings,
@@ -114,10 +119,16 @@ pub fn run() {
                     config_dir,
                 }),
                 include_mouse_move: include_mouse_move.clone(),
+                watermark_item: Mutex::new(None),
             });
 
             // --- 트레이 ------------------------------------------------------
             tray::build(app.handle())?;
+
+            // --- 워터마크 모드 startup 복원 (설정이 켜져 있으면 클릭-스루 적용) ----
+            if watermark_mode {
+                tray::apply_watermark(app.handle(), true);
+            }
 
             // --- 입력 훅 + 매니저 스레드 -------------------------------------
             let (tx, rx) = mpsc::channel::<()>();
