@@ -71,6 +71,14 @@ pub fn run() {
 
             // --- 플로팅 창 위치/표시 복원 ------------------------------------
             if let Some(win) = app.get_webview_window("floating") {
+                // 저장된 컴팩트 창 크기 적용 (초기 리사이즈 깜빡임 방지).
+                // tauri.conf.json 은 기본 300x110 이고, 여기서 저장값으로 맞춘다.
+                if let Err(e) = win.set_size(tauri::LogicalSize::new(
+                    settings.floating_width as f64,
+                    settings.floating_height as f64,
+                )) {
+                    eprintln!("[diligent-hours] 플로팅 창 크기 복원 실패: {e}");
+                }
                 if let Some((x, y)) = settings.floating_pos {
                     // 모니터 분리/해상도 변경 등으로 저장 위치가 화면 밖이면
                     // 복원하지 않고 기본 위치 사용 (창을 되찾을 방법이 없으므로).

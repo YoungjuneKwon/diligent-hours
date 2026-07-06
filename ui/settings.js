@@ -19,8 +19,8 @@
   }
 
   /** "#rgb"/"#rrggbb" 를 <input type=color> 가 요구하는 "#rrggbb" 로 정규화. 잘못되면 기본값. */
-  function normalizeHexColor(value) {
-    const fallback = "#0f172a";
+  function normalizeHexColor(value, fallbackColor) {
+    const fallback = fallbackColor || "#0f172a";
     if (typeof value !== "string") return fallback;
     let hex = value.trim();
     if (/^#[0-9a-fA-F]{3}$/.test(hex)) {
@@ -32,6 +32,7 @@
   function updateRangeLabels() {
     el("opacity-value").textContent = Number(el("opacity").value).toFixed(2);
     el("fontSize-value").textContent = el("fontSize").value + "px";
+    el("padding-value").textContent = el("padding").value + "px";
   }
 
   function populate(settings) {
@@ -41,8 +42,12 @@
     (settings.displayFormat === "seconds" ? el("fmt-seconds") : el("fmt-hms")).checked = true;
     el("showFloating").checked = !!settings.showFloating;
     el("bg-color").value = normalizeHexColor(settings.floatingBgColor);
+    el("text-color").value = normalizeHexColor(settings.floatingTextColor, "#e2e8f0");
     el("opacity").value = settings.floatingOpacity;
     el("fontSize").value = settings.fontSizePx;
+    el("padding").value = clampInt(settings.floatingPaddingPx, 0, 40, 0);
+    el("win-width").value = clampInt(settings.floatingWidth, 160, 800, 300);
+    el("win-height").value = clampInt(settings.floatingHeight, 70, 400, 110);
     el("includeMouseMove").checked = !!settings.includeMouseMove;
     el("notifyToast").checked = !!settings.notifyToast;
     el("notifySound").checked = !!settings.notifySound;
@@ -59,8 +64,12 @@
     s.displayFormat = el("fmt-seconds").checked ? "seconds" : "hms";
     s.showFloating = el("showFloating").checked;
     s.floatingBgColor = normalizeHexColor(el("bg-color").value);
+    s.floatingTextColor = normalizeHexColor(el("text-color").value, "#e2e8f0");
     s.floatingOpacity = Number(el("opacity").value);
     s.fontSizePx = clampInt(el("fontSize").value, 16, 64, 30);
+    s.floatingPaddingPx = clampInt(el("padding").value, 0, 40, 0);
+    s.floatingWidth = clampInt(el("win-width").value, 160, 800, 300);
+    s.floatingHeight = clampInt(el("win-height").value, 70, 400, 110);
     s.includeMouseMove = el("includeMouseMove").checked;
     s.notifyToast = el("notifyToast").checked;
     s.notifySound = el("notifySound").checked;
@@ -99,6 +108,7 @@
 
     el("opacity").addEventListener("input", updateRangeLabels);
     el("fontSize").addEventListener("input", updateRangeLabels);
+    el("padding").addEventListener("input", updateRangeLabels);
     el("save").addEventListener("click", save);
 
     el("manual-start").addEventListener("click", function () {

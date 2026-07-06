@@ -28,6 +28,9 @@ body.floating-body {
 body.floating-body {
   --dh-bg-rgb: 15, 23, 42;
   --opacity: 0.85;
+  /* 글씨 색상 / 카드 여백 — JS 가 설정값으로 덮어쓴다. 기본값 = 기존 스타일. */
+  --dh-text-color: #e2e8f0;
+  --dh-pad: 0px;
 }
 
 body.floating-body #container {
@@ -38,8 +41,9 @@ body.floating-body #container {
   position: absolute;
   left: 0;
   top: 0;
-  width: 300px;
-  height: 110px;
+  width: var(--dh-w, 300px);
+  height: var(--dh-h, 110px);
+  padding: var(--dh-pad, 0px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -52,7 +56,7 @@ body.floating-body #time {
   font-family: "Cascadia Mono", Consolas, "SF Mono", "D2Coding", monospace;
   font-weight: 700;
   font-size: var(--font-size);
-  color: #e2e8f0;
+  color: var(--dh-text-color, #e2e8f0);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
   letter-spacing: 0.5px;
   white-space: nowrap;

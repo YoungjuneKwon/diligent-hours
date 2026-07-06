@@ -47,6 +47,18 @@ pub struct Settings {
     /// 플로팅 창 배경 색상 (hex, 예 "#0f172a"). floating_opacity 와 함께 카드 배경에 적용.
     #[serde(default = "default_floating_bg_color")]
     pub floating_bg_color: String,
+    /// 플로팅 창 글씨(시간 텍스트) 색상 (hex, 예 "#e2e8f0").
+    #[serde(default = "default_floating_text_color")]
+    pub floating_text_color: String,
+    /// 플로팅 카드 안쪽 여백(px). 0~40 클램프. 기본 0(현재 시각적 변화 없음).
+    #[serde(default = "default_floating_padding_px")]
+    pub floating_padding_px: u32,
+    /// 플로팅 창(컴팩트 카드) 너비(px). 160~800 클램프. 기본 300(현재 창 크기).
+    #[serde(default = "default_floating_width")]
+    pub floating_width: u32,
+    /// 플로팅 창(컴팩트 카드) 높이(px). 70~400 클램프. 기본 110(현재 창 크기).
+    #[serde(default = "default_floating_height")]
+    pub floating_height: u32,
     /// 마지막으로 적용한 "종료 시각 지정" 값 ("HH:MM"). 재시작 후 팝오버 프리필용.
     #[serde(default)]
     pub last_target: Option<String>,
@@ -58,6 +70,26 @@ pub struct Settings {
 
 fn default_floating_bg_color() -> String {
     "#0f172a".to_string()
+}
+
+/// 기본 글씨 색상 = style.css 의 #time 색상(#e2e8f0). 기본값이 시각적 변화를 주지 않게.
+fn default_floating_text_color() -> String {
+    "#e2e8f0".to_string()
+}
+
+/// 기본 카드 여백 = 현재 style.css 의 #container 여백(0). 기본값이 시각적 변화 없음.
+fn default_floating_padding_px() -> u32 {
+    0
+}
+
+/// 기본 창 너비 = tauri.conf.json/style.css 의 300.
+fn default_floating_width() -> u32 {
+    300
+}
+
+/// 기본 창 높이 = tauri.conf.json/style.css 의 110.
+fn default_floating_height() -> u32 {
+    110
 }
 
 impl Default for Settings {
@@ -74,6 +106,10 @@ impl Default for Settings {
             autostart: false,
             floating_pos: None,
             floating_bg_color: default_floating_bg_color(),
+            floating_text_color: default_floating_text_color(),
+            floating_padding_px: default_floating_padding_px(),
+            floating_width: default_floating_width(),
+            floating_height: default_floating_height(),
             last_target: None,
             watermark_mode: false,
         }
@@ -94,6 +130,14 @@ impl Settings {
         if !is_valid_hex_color(&self.floating_bg_color) {
             self.floating_bg_color = default_floating_bg_color();
         }
+        // 글씨 색상: 동일한 hex 검증, 아니면 기본값으로.
+        if !is_valid_hex_color(&self.floating_text_color) {
+            self.floating_text_color = default_floating_text_color();
+        }
+        // 여백/창 크기: 안전 범위 클램프.
+        self.floating_padding_px = self.floating_padding_px.clamp(0, 40);
+        self.floating_width = self.floating_width.clamp(160, 800);
+        self.floating_height = self.floating_height.clamp(70, 400);
     }
 }
 
@@ -255,6 +299,10 @@ pub struct StatusPayload {
     pub font_size_px: u32,
     pub floating_opacity: f64,
     pub floating_bg_color: String,
+    pub floating_text_color: String,
+    pub floating_padding_px: u32,
+    pub floating_width: u32,
+    pub floating_height: u32,
 }
 
 /// 유효 종료 시각. "종료 시각 지정"(target_end)이 있으면 그것을,
@@ -323,6 +371,10 @@ pub fn build_payload(data: &AppData, now: DateTime<Local>) -> StatusPayload {
         font_size_px: data.settings.font_size_px,
         floating_opacity: data.settings.floating_opacity,
         floating_bg_color: data.settings.floating_bg_color.clone(),
+        floating_text_color: data.settings.floating_text_color.clone(),
+        floating_padding_px: data.settings.floating_padding_px,
+        floating_width: data.settings.floating_width,
+        floating_height: data.settings.floating_height,
     }
 }
 

@@ -35,10 +35,37 @@
   let currentSettings = null;
   let popoverOpen = false;
 
-  // 팝오버 배치용 지오메트리 상수 (LOGICAL px). tauri.conf.json 의 300x110 카드 기준.
-  const CARD_W = 300;
-  const CARD_H = 110;
+  // 팝오버 배치용 지오메트리 상수 (LOGICAL px).
+  // 기본 카드 크기는 설정(floatingWidth/floatingHeight)에서 파생된다 — 폴백 300x110.
+  const DEFAULT_CARD_W = 300;
+  const DEFAULT_CARD_H = 110;
   const GAP = 6;
+
+  /** 설정에서 파생한 현재 컴팩트 카드 너비(LOGICAL px). */
+  function cardW() {
+    const src = currentSettings || settings;
+    const w = src && Number(src.floatingWidth);
+    return w && w > 0 ? w : DEFAULT_CARD_W;
+  }
+  /** 설정에서 파생한 현재 컴팩트 카드 높이(LOGICAL px). */
+  function cardH() {
+    const src = currentSettings || settings;
+    const h = src && Number(src.floatingHeight);
+    return h && h > 0 ? h : DEFAULT_CARD_H;
+  }
+
+  /** 팝오버가 닫혀 있을 때만 컴팩트 창 크기를 설정값으로 맞춘다. Tauri 콜 가드. */
+  function applyCompactWindowSize() {
+    if (popoverOpen) return; // 확장 크기와 싸우지 않도록 defer
+    if (!LogicalSize) return;
+    try {
+      appWindow.setSize(new LogicalSize(cardW(), cardH())).catch(function (e) {
+        console.error("컴팩트 창 크기 적용 실패:", e);
+      });
+    } catch (e) {
+      console.error("컴팩트 창 크기 적용 예외:", e);
+    }
+  }
   const PANEL_W = 260; // #popover 폭(style.css)과 일치 — 측정 실패 시 폴백
   const PANEL_H = 320; // 패널 자연 높이 폴백 — 실제 측정값을 우선 사용
 
@@ -89,7 +116,15 @@
     return r + ", " + g + ", " + b;
   }
 
-  function applyStyle(fontSizePx, floatingOpacity, floatingBgColor) {
+  /** #container 카드 크기를 설정값(cardW/cardH)에 맞춘다 — 창 크기와 동일하게 추적.
+      CSS 는 width/height 를 var(--dh-w/--dh-h) 로 읽으므로 여기서 주입한다. */
+  function applyCardSize() {
+    document.body.style.setProperty("--dh-w", cardW() + "px");
+    document.body.style.setProperty("--dh-h", cardH() + "px");
+  }
+
+  function applyStyle(fontSizePx, floatingOpacity, floatingBgColor, floatingTextColor, floatingPaddingPx) {
+    applyCardSize();
     if (typeof floatingOpacity === "number") {
       containerEl.style.setProperty("--opacity", String(floatingOpacity));
       document.body.style.setProperty("--opacity", String(floatingOpacity));
@@ -100,11 +135,23 @@
     if (typeof floatingBgColor === "string" && floatingBgColor) {
       document.body.style.setProperty("--dh-bg-rgb", hexToRgbVar(floatingBgColor));
     }
+    if (typeof floatingTextColor === "string" && floatingTextColor) {
+      document.body.style.setProperty("--dh-text-color", floatingTextColor);
+    }
+    if (typeof floatingPaddingPx === "number" && floatingPaddingPx >= 0) {
+      document.body.style.setProperty("--dh-pad", floatingPaddingPx + "px");
+    }
   }
 
   function render() {
     if (!status) return;
-    applyStyle(status.fontSizePx, status.floatingOpacity, status.floatingBgColor);
+    applyStyle(
+      status.fontSizePx,
+      status.floatingOpacity,
+      status.floatingBgColor,
+      status.floatingTextColor,
+      status.floatingPaddingPx
+    );
     containerEl.classList.remove("idle", "running", "finished");
     if (status.state === "running") {
       containerEl.classList.add("running");
@@ -262,16 +309,18 @@
     // 블라인드 폴백(모니터/좌표 정보 전무): DOWN 배치.
     // 카드는 inner-left 0 에 두어 화면상의 x 를 유지하고, 패널은 카드 아래.
     // 창 폭은 max(CARD_W, panelW) 이므로 카드 왼쪽 정렬로 카드가 화면 밖으로 나가지 않는다.
+    const cardWv = cardW();
+    const cardHv = cardH();
     const blindDownFallback = function () {
       restoreCardOrigin = null;
-      const winW = Math.max(CARD_W, panelW);
-      const winH = CARD_H + GAP + panelH;
+      const winW = Math.max(cardWv, panelW);
+      const winH = cardHv + GAP + panelH;
       if (LogicalSize) {
         appWindow.setSize(new LogicalSize(winW, winH)).catch(function (e) {
           console.error("setSize 실패:", e);
         });
       }
-      placeElements(0, 0, 0, CARD_H + GAP);
+      placeElements(0, 0, 0, cardHv + GAP);
     };
 
     let outer, monitor;
@@ -315,11 +364,11 @@
     const monRight = monitor.position.x + monitor.size.width;
     const monBottom = monitor.position.y + monitor.size.height;
 
-    const rightW = CARD_W + GAP + panelW;
-    const rightH = Math.max(CARD_H, panelH);
-    const stackW = Math.max(CARD_W, panelW);
-    const downH = CARD_H + GAP + panelH;
-    const upH = panelH + GAP + CARD_H;
+    const rightW = cardWv + GAP + panelW;
+    const rightH = Math.max(cardHv, panelH);
+    const stackW = Math.max(cardWv, panelW);
+    const downH = cardHv + GAP + panelH;
+    const upH = panelH + GAP + cardHv;
 
     // 후보 배치: [RIGHT, DOWN, UP] 순. LEFT 는 제거됨.
     const candidates = [
@@ -331,7 +380,7 @@
         winH: rightH,
         cardL: 0,
         cardT: 0,
-        panelL: CARD_W + GAP,
+        panelL: cardWv + GAP,
         panelT: 0,
         fits: cardX + rightW * scale <= monRight && cardY + rightH * scale <= monBottom,
       },
@@ -344,7 +393,7 @@
         cardL: 0,
         cardT: 0,
         panelL: 0,
-        panelT: CARD_H + GAP,
+        panelT: cardHv + GAP,
         fits: cardY + downH * scale <= monBottom && cardX + stackW * scale <= monRight,
       },
       {
@@ -371,7 +420,7 @@
     if (!chosen) {
       // 어디에도 완전히 맞지 않음(작은 화면) → 세로 여유가 큰 쪽 선택, 카드는 화면 유지.
       // 아래 여유: 카드 하단 ~ 모니터 하단(DOWN). 위 여유: 모니터 상단 ~ 카드 상단(UP).
-      const roomBelow = monBottom - (cardY + CARD_H * scale);
+      const roomBelow = monBottom - (cardY + cardHv * scale);
       const roomAbove = cardY - monTop;
       const goDown = roomBelow >= roomAbove;
       // 선택 후보를 복제해서 창 높이를 화면 안 여유에 맞춰 줄이고, 패널 max-height 를
@@ -382,7 +431,7 @@
         const panelRoom = Math.max(0, Math.floor(roomBelow / scale) - GAP);
         clampedPanelH = panelRoom;
         chosen = Object.assign({}, candidates[1], {
-          winH: CARD_H + GAP + panelRoom,
+          winH: cardHv + GAP + panelRoom,
         });
       } else {
         // UP: 창 top-left 을 monTop 에 맞추고, 카드는 창 하단에 유지. 패널은 위 여유만큼.
@@ -390,7 +439,7 @@
         clampedPanelH = panelRoom;
         chosen = Object.assign({}, candidates[2], {
           winY: monTop,
-          winH: panelRoom + GAP + CARD_H,
+          winH: panelRoom + GAP + cardHv,
           cardT: panelRoom + GAP,
           panelT: 0,
         });
@@ -515,7 +564,7 @@
     programmaticMove = true;
     try {
       if (LogicalSize) {
-        await appWindow.setSize(new LogicalSize(CARD_W, CARD_H));
+        await appWindow.setSize(new LogicalSize(cardW(), cardH()));
       }
       // UP 배치로 창을 옮겼다면 카드를 원래 물리 좌표로 복원.
       if (restoreCardOrigin && PhysicalPosition) {
@@ -661,6 +710,8 @@
       status = await invoke("get_status");
       // 시작 시 워터마크 모드면 시각 큐 반영(클릭-스루 자체는 백엔드가 적용).
       document.body.classList.toggle("watermark", !!(settings && settings.watermarkMode));
+      // 백엔드 startup 에서도 창 크기를 맞추지만, 프론트에서도 한 번 보정한다.
+      applyCompactWindowSize();
       render();
     } catch (e) {
       console.error("초기 상태 로드 실패:", e);
@@ -696,17 +747,30 @@
     await listen("settings-changed", function (event) {
       settings = event.payload;
       currentSettings = settings;
-      applyStyle(settings.fontSizePx, settings.floatingOpacity, settings.floatingBgColor);
+      applyStyle(
+        settings.fontSizePx,
+        settings.floatingOpacity,
+        settings.floatingBgColor,
+        settings.floatingTextColor,
+        settings.floatingPaddingPx
+      );
       if (status) {
         status.displayFormat = settings.displayFormat;
         status.fontSizePx = settings.fontSizePx;
         status.floatingOpacity = settings.floatingOpacity;
         status.floatingBgColor = settings.floatingBgColor;
+        status.floatingTextColor = settings.floatingTextColor;
+        status.floatingPaddingPx = settings.floatingPaddingPx;
+        status.floatingWidth = settings.floatingWidth;
+        status.floatingHeight = settings.floatingHeight;
       }
       // 팝오버가 열려 있으면 외부 변경(트레이 토글 등)을 컨트롤에 반영
       if (popoverOpen) {
         syncPopoverFromSettings();
       }
+      // 컴팩트 창 크기 적용: 팝오버가 닫혀 있을 때만 즉시 리사이즈.
+      // 열려 있으면 확장 크기와 싸우지 않도록 다음 open/close 에 맡긴다.
+      applyCompactWindowSize();
       render();
     });
 

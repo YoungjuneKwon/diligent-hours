@@ -1,6 +1,6 @@
 [package]
 name = "diligent-hours"
-version = "0.3.0"
+version = "0.3.1"
 description = "DiligentHours — 첫 입력 감지 기반 근무시간 카운트다운"
 edition = "2021"
 

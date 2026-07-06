@@ -59,11 +59,12 @@ cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc
 
 ## Status
 
-- **v0.3.0 released** — [GitHub Releases](https://github.com/YoungjuneKwon/diligent-hours/releases)
+- **v0.3.1 released** — [GitHub Releases](https://github.com/YoungjuneKwon/diligent-hours/releases)
 - Added in v0.2: floating-window `⋯` popover (countdown duration, display format, set end time, minimize to tray, reset, quit app), tray-icon pie chart of remaining time, cleaned-up display format (HH:MM:SS / comma-grouped seconds)
 - Added in v0.2.1: show the popover in a position that does not cover the main window (right side by default), persist the set end time, background color / opacity controls in the settings window, reduced padding
 - Fixed in v0.2.2: the popover being pushed off-screen when the window sits at the right edge (falls back to below → above when there isn't enough room on the right), plus measuring the actual panel size
 - Added in v0.3.0: watermark (click-through) mode toggled from the tray — while on, the window passes mouse clicks/drags through to the apps behind it (like a non-interactive watermark), and cannot be dragged or clicked; turn it off from the tray to interact again
+- Added in v0.3.1: adjustable window size, text color, and padding in the settings window (in addition to background color, opacity, and font size) — all persisted
 
 ## License
 
