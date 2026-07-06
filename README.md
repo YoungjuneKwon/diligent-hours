@@ -63,9 +63,10 @@ cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc
 
 ## 상태
 
-- **v0.2.1 릴리스** — [GitHub Releases](https://github.com/YoungjuneKwon/diligent-hours/releases)
+- **v0.2.2 릴리스** — [GitHub Releases](https://github.com/YoungjuneKwon/diligent-hours/releases)
 - v0.2 추가: 플로팅 창 `⋯` 팝오버(카운트다운 시간·표시 방식·종료 시각 지정·트레이로 내리기·초기화·어플 종료), 트레이 아이콘 남은 시간 파이차트, 표시 형식 정리(시:분:초 / 콤마 초)
 - v0.2.1 추가: 팝오버를 본 창을 가리지 않는 위치(기본 우측)에 표시, 종료 시각 지정 값 영속화, 설정 창 배경색·투명도 조절, 여백 축소
+- v0.2.2 수정: 창이 화면 우측 끝에 있을 때 팝오버가 화면 밖으로 밀리던 문제(우측 공간 부족 시 아래→위 순으로 배치), 패널 크기 실측
 
 ## 라이선스
 

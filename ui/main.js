@@ -39,16 +39,17 @@
   const CARD_W = 300;
   const CARD_H = 110;
   const GAP = 6;
-  const PANEL_W = 260; // #popover 폭(style.css)과 일치
-  const PANEL_H = 320; // 여백 축소 후의 패널 자연 높이 근사; 초과 시 패널 스크롤 폴백
+  const PANEL_W = 260; // #popover 폭(style.css)과 일치 — 측정 실패 시 폴백
+  const PANEL_H = 320; // 패널 자연 높이 폴백 — 실제 측정값을 우선 사용
 
   const LogicalSize = tauriWindow.LogicalSize;
   const PhysicalPosition = tauriWindow.PhysicalPosition;
+  const primaryMonitor = tauriWindow.primaryMonitor;
 
   // 프로그램적 창 이동/리사이즈 중에는 onMoved 저장을 건너뛴다(팝오버 확장/복원이
   // 플로팅 위치로 저장되지 않게). 실제 사용자 드래그(팝오버 닫힘)만 저장한다.
   let programmaticMove = false;
-  // 팝오버가 창 top-left 를 바꾼 경우(LEFT/UP) 닫을 때 복원할 원래 물리 좌표.
+  // 팝오버가 창 top-left 를 바꾼 경우(UP) 닫을 때 복원할 원래 물리 좌표.
   let restoreCardOrigin = null;
 
   function clampInt(value, min, max, fallback) {
@@ -200,57 +201,127 @@
     });
   }
 
-  /** 팝오버를 카드 옆(우/좌/하/상)에 겹치지 않게 배치하고 창을 확장한다. */
+  /**
+   * #popover 의 실제 렌더 크기(LOGICAL css px)를 측정한다. 팝오버는 닫혀 있을 때
+   * [hidden] 이므로, 잠시 화면 밖에서 visibility:hidden 으로 렌더시켜 offset 크기를
+   * 읽는다. 측정 실패(0) 시 상수(PANEL_W/PANEL_H)로 폴백한다.
+   * openPopover 는 이미 popoverEl.hidden=false 로 만든 뒤 호출하지만, 배치 전
+   * 안정적인 크기를 얻기 위해 안전하게 강제 측정한다.
+   */
+  function measurePanel() {
+    let w = 0;
+    let h = 0;
+    const el = popoverEl;
+    // 현재 인라인 스타일을 저장했다가 복원.
+    const saved = {
+      hidden: el.hidden,
+      visibility: el.style.visibility,
+      left: el.style.left,
+      top: el.style.top,
+      maxHeight: el.style.maxHeight,
+      overflowY: el.style.overflowY,
+    };
+    try {
+      el.hidden = false;
+      el.style.visibility = "hidden";
+      el.style.left = "-10000px";
+      el.style.top = "0px";
+      // 뷰포트 상대 제약(max-height: calc(100vh-…))을 잠시 해제해 자연 높이를 읽는다.
+      // 그렇지 않으면 측정 시점의 컴팩트 창(110px)에 맞춰 클램프되어 panelH 가 과소평가된다.
+      el.style.maxHeight = "none";
+      el.style.overflowY = "visible";
+      // 강제 리플로우 후 측정.
+      w = el.offsetWidth;
+      h = el.offsetHeight;
+    } catch (_e) {
+      w = 0;
+      h = 0;
+    } finally {
+      el.style.visibility = saved.visibility;
+      el.style.left = saved.left;
+      el.style.top = saved.top;
+      el.style.maxHeight = saved.maxHeight;
+      el.style.overflowY = saved.overflowY;
+      el.hidden = saved.hidden;
+    }
+    return {
+      panelW: w > 0 ? w : PANEL_W,
+      panelH: h > 0 ? h : PANEL_H,
+    };
+  }
+
+  /** 팝오버를 카드 옆(우/하/상)에 겹치지 않게 배치하고 창을 확장한다.
+      우선순위: RIGHT → DOWN → UP. 어디에도 안 맞으면 세로 여유가 큰 쪽(DOWN/UP)을
+      골라 카드를 화면 안에 유지하고 패널은 스크롤(max-height)로 처리한다. */
   async function expandForPopover() {
-    // 기본(폴백): 단순 RIGHT 배치 — 창 top-left 유지, 카드 (0,0), 패널 오른쪽.
-    const fallback = function () {
+    // 실제 패널 크기(LOGICAL css px) 측정.
+    const meas = measurePanel();
+    const panelW = meas.panelW;
+    const panelH = meas.panelH;
+
+    // 블라인드 폴백(모니터/좌표 정보 전무): DOWN 배치.
+    // 카드는 inner-left 0 에 두어 화면상의 x 를 유지하고, 패널은 카드 아래.
+    // 창 폭은 max(CARD_W, panelW) 이므로 카드 왼쪽 정렬로 카드가 화면 밖으로 나가지 않는다.
+    const blindDownFallback = function () {
       restoreCardOrigin = null;
+      const winW = Math.max(CARD_W, panelW);
+      const winH = CARD_H + GAP + panelH;
       if (LogicalSize) {
-        appWindow.setSize(new LogicalSize(CARD_W + GAP + PANEL_W, Math.max(CARD_H, PANEL_H)));
+        appWindow.setSize(new LogicalSize(winW, winH)).catch(function (e) {
+          console.error("setSize 실패:", e);
+        });
       }
-      placeElements(0, 0, CARD_W + GAP, 0);
+      placeElements(0, 0, 0, CARD_H + GAP);
     };
 
     let outer, monitor;
     try {
       outer = await appWindow.outerPosition();
+    } catch (e) {
+      console.error("outerPosition 조회 실패, DOWN 폴백:", e);
+      programmaticMove = true;
+      blindDownFallback();
+      return;
+    }
+
+    // 모니터 획득: currentMonitor → primaryMonitor 폴백.
+    try {
       monitor = await appWindow.currentMonitor();
     } catch (e) {
-      console.error("팝오버 배치 정보 조회 실패, RIGHT 폴백:", e);
-      fallback();
-      return;
+      console.error("currentMonitor 조회 실패:", e);
+      monitor = null;
+    }
+    if (!monitor && typeof primaryMonitor === "function") {
+      try {
+        monitor = await primaryMonitor();
+      } catch (e) {
+        console.error("primaryMonitor 조회 실패:", e);
+        monitor = null;
+      }
     }
 
     const cardX = outer.x;
     const cardY = outer.y;
 
     if (!monitor) {
-      // 모니터 정보 없음 → fit 검사 없이 RIGHT.
+      // 두 모니터 조회 모두 실패 → 블라인드 DOWN(RIGHT 아님).
       programmaticMove = true;
-      try {
-        if (LogicalSize) {
-          await appWindow.setSize(new LogicalSize(CARD_W + GAP + PANEL_W, Math.max(CARD_H, PANEL_H)));
-        }
-      } catch (e) {
-        console.error("setSize 실패:", e);
-      }
-      restoreCardOrigin = null;
-      placeElements(0, 0, CARD_W + GAP, 0);
+      blindDownFallback();
       return;
     }
 
     const scale = monitor.scaleFactor || 1;
-    const monLeft = monitor.position.x;
     const monTop = monitor.position.y;
     const monRight = monitor.position.x + monitor.size.width;
     const monBottom = monitor.position.y + monitor.size.height;
 
-    const rightW = CARD_W + GAP + PANEL_W;
-    const rightH = Math.max(CARD_H, PANEL_H);
-    const downW = Math.max(CARD_W, PANEL_W);
-    const downH = CARD_H + GAP + PANEL_H;
+    const rightW = CARD_W + GAP + panelW;
+    const rightH = Math.max(CARD_H, panelH);
+    const stackW = Math.max(CARD_W, panelW);
+    const downH = CARD_H + GAP + panelH;
+    const upH = panelH + GAP + CARD_H;
 
-    // 후보 배치: [RIGHT, LEFT, DOWN, UP] 순으로 첫 번째로 맞는 것을 선택.
+    // 후보 배치: [RIGHT, DOWN, UP] 순. LEFT 는 제거됨.
     const candidates = [
       {
         name: "RIGHT",
@@ -265,40 +336,28 @@
         fits: cardX + rightW * scale <= monRight && cardY + rightH * scale <= monBottom,
       },
       {
-        name: "LEFT",
-        winX: cardX - (PANEL_W + GAP) * scale,
-        winY: cardY,
-        winW: rightW,
-        winH: rightH,
-        cardL: PANEL_W + GAP,
-        cardT: 0,
-        panelL: 0,
-        panelT: 0,
-        fits: cardX - (PANEL_W + GAP) * scale >= monLeft && cardY + rightH * scale <= monBottom,
-      },
-      {
         name: "DOWN",
         winX: cardX,
         winY: cardY,
-        winW: downW,
+        winW: stackW,
         winH: downH,
         cardL: 0,
         cardT: 0,
         panelL: 0,
         panelT: CARD_H + GAP,
-        fits: cardY + downH * scale <= monBottom && cardX + downW * scale <= monRight,
+        fits: cardY + downH * scale <= monBottom && cardX + stackW * scale <= monRight,
       },
       {
         name: "UP",
         winX: cardX,
-        winY: cardY - (PANEL_H + GAP) * scale,
-        winW: downW,
-        winH: downH,
+        winY: cardY - (panelH + GAP) * scale,
+        winW: stackW,
+        winH: upH,
         cardL: 0,
-        cardT: PANEL_H + GAP,
+        cardT: panelH + GAP,
         panelL: 0,
         panelT: 0,
-        fits: cardY - (PANEL_H + GAP) * scale >= monTop && cardX + downW * scale <= monRight,
+        fits: cardY - (panelH + GAP) * scale >= monTop && cardX + stackW * scale <= monRight,
       },
     ];
 
@@ -306,26 +365,45 @@
       return c.fits;
     });
 
+    // 이번 오픈에서 패널에 강제로 건 인라인 max-height(px, LOGICAL). 폴백 스크롤용.
+    let clampedPanelH = null;
+
     if (!chosen) {
-      // 완전히 맞는 배치 없음 → RIGHT 로 두되 창을 모니터 안으로 클램프(카드 우선 보임).
-      chosen = candidates[0];
-      let wx = chosen.winX;
-      let wy = chosen.winY;
-      const wPhysW = chosen.winW * scale;
-      const wPhysH = chosen.winH * scale;
-      if (wx + wPhysW > monRight) wx = monRight - wPhysW;
-      if (wy + wPhysH > monBottom) wy = monBottom - wPhysH;
-      if (wx < monLeft) wx = monLeft;
-      if (wy < monTop) wy = monTop;
-      chosen = Object.assign({}, chosen, { winX: wx, winY: wy });
+      // 어디에도 완전히 맞지 않음(작은 화면) → 세로 여유가 큰 쪽 선택, 카드는 화면 유지.
+      // 아래 여유: 카드 하단 ~ 모니터 하단(DOWN). 위 여유: 모니터 상단 ~ 카드 상단(UP).
+      const roomBelow = monBottom - (cardY + CARD_H * scale);
+      const roomAbove = cardY - monTop;
+      const goDown = roomBelow >= roomAbove;
+      // 선택 후보를 복제해서 창 높이를 화면 안 여유에 맞춰 줄이고, 패널 max-height 를
+      // 그 여유(LOGICAL px)로 명시한다. 그래야 CSS overflow-y:auto 가 실제로 스크롤되고
+      // 창이 모니터 밖으로 나가지 않는다.
+      if (goDown) {
+        // DOWN: 카드는 그대로, 패널은 카드 아래. 아래 여유(로지컬)만큼만 패널을 노출.
+        const panelRoom = Math.max(0, Math.floor(roomBelow / scale) - GAP);
+        clampedPanelH = panelRoom;
+        chosen = Object.assign({}, candidates[1], {
+          winH: CARD_H + GAP + panelRoom,
+        });
+      } else {
+        // UP: 창 top-left 을 monTop 에 맞추고, 카드는 창 하단에 유지. 패널은 위 여유만큼.
+        const panelRoom = Math.max(0, Math.floor(roomAbove / scale) - GAP);
+        clampedPanelH = panelRoom;
+        chosen = Object.assign({}, candidates[2], {
+          winY: monTop,
+          winH: panelRoom + GAP + CARD_H,
+          cardT: panelRoom + GAP,
+          panelT: 0,
+        });
+      }
     }
 
     programmaticMove = true;
     try {
-      const movesWindow = Math.round(chosen.winX) !== Math.round(cardX) || Math.round(chosen.winY) !== Math.round(cardY);
+      const movesWindow =
+        Math.round(chosen.winX) !== Math.round(cardX) || Math.round(chosen.winY) !== Math.round(cardY);
       if (movesWindow && PhysicalPosition) {
         await appWindow.setPosition(new PhysicalPosition(Math.round(chosen.winX), Math.round(chosen.winY)));
-        // 닫을 때 카드를 원래 자리로 되돌리기 위해 원점 저장.
+        // 닫을 때 카드를 원래 자리로 되돌리기 위해 원점 저장(UP 등 창 top-left 이동 시).
         restoreCardOrigin = { x: cardX, y: cardY };
       } else {
         restoreCardOrigin = null;
@@ -333,10 +411,13 @@
       if (LogicalSize) {
         await appWindow.setSize(new LogicalSize(chosen.winW, chosen.winH));
       }
+      // 폴백(none-fits)일 때만 패널 높이를 화면 안 여유로 명시해 스크롤되게 한다.
+      // 정상 배치는 CSS 기본 max-height(calc(100vh-12px)) 에 맡긴다.
+      popoverEl.style.maxHeight = clampedPanelH != null ? clampedPanelH + "px" : "";
       placeElements(chosen.cardL, chosen.cardT, chosen.panelL, chosen.panelT);
     } catch (e) {
-      console.error("팝오버 확장 실패, RIGHT 폴백:", e);
-      fallback();
+      console.error("팝오버 확장 실패, DOWN 폴백:", e);
+      blindDownFallback();
     }
   }
 
@@ -426,6 +507,8 @@
     if (!popoverOpen) return;
     popoverOpen = false;
     popoverEl.hidden = true;
+    // 폴백에서 걸었을 수 있는 인라인 max-height 제거 → 다음 오픈은 CSS 기본값으로.
+    popoverEl.style.maxHeight = "";
     menuBtn.classList.remove("open");
     menuBtn.setAttribute("aria-expanded", "false");
 
@@ -434,7 +517,7 @@
       if (LogicalSize) {
         await appWindow.setSize(new LogicalSize(CARD_W, CARD_H));
       }
-      // LEFT/UP 배치로 창을 옮겼다면 카드를 원래 물리 좌표로 복원.
+      // UP 배치로 창을 옮겼다면 카드를 원래 물리 좌표로 복원.
       if (restoreCardOrigin && PhysicalPosition) {
         await appWindow.setPosition(new PhysicalPosition(restoreCardOrigin.x, restoreCardOrigin.y));
       }
