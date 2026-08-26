@@ -15,10 +15,23 @@ use crate::AppState;
 pub const TRAY_ID: &str = "main";
 
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
-    let toggle = MenuItem::with_id(
+    let floating_on = {
+        let state = app.state::<AppState>();
+        let data = session::lock_data(&state.data);
+        data.settings.show_floating
+    };
+    let toggle = CheckMenuItem::with_id(
         app,
         "toggle-floating",
         "플로팅 창 표시/숨기기",
+        true,
+        floating_on,
+        None::<&str>,
+    )?;
+    let recover = MenuItem::with_id(
+        app,
+        "recover-floating",
+        "창을 시계 위로 가져오기",
         true,
         None::<&str>,
     )?;
@@ -47,6 +60,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         app,
         &[
             &toggle,
+            &recover,
             &watermark,
             &start,
             &reset,
@@ -60,10 +74,14 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     // 토글 핸들러가 체크 상태를 동기화할 수 있도록 CheckMenuItem 핸들을 보관한다.
     {
         let state = app.state::<AppState>();
-        let locked = state.watermark_item.lock();
-        if let Ok(mut slot) = locked {
-            *slot = Some(watermark.clone());
-        }
+        *state
+            .floating_item
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(toggle.clone());
+        *state
+            .watermark_item
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(watermark.clone());
     }
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
@@ -71,6 +89,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "toggle-floating" => toggle_floating(app),
+            "recover-floating" => recover_floating(app),
             "watermark" => toggle_watermark(app),
             "manual-start" => session::manual_start(app, Local::now()),
             "manual-reset" => session::manual_reset(app, Local::now()),
@@ -285,7 +304,22 @@ pub fn persist_floating_visibility(app: &AppHandle, show: bool) {
         session::save_settings(&data.config_dir, &data.settings);
         data.settings.clone()
     };
+    sync_floating_check(app, show);
     let _ = app.emit("settings-changed", &settings_clone);
+}
+
+/// 플로팅 창의 실제 표시 상태와 트레이 체크 표시를 맞춘다.
+pub fn sync_floating_check(app: &AppHandle, show: bool) {
+    let state = app.state::<AppState>();
+    let slot = state
+        .floating_item
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(item) = slot.as_ref() {
+        if let Err(e) = item.set_checked(show) {
+            eprintln!("[diligent-hours] 플로팅 표시 체크 상태 갱신 실패: {e}");
+        }
+    }
 }
 
 fn toggle_floating(app: &AppHandle) {
@@ -300,6 +334,62 @@ fn toggle_floating(app: &AppHandle) {
         let _ = win.hide();
     }
     persist_floating_visibility(app, show);
+}
+
+/// 플로팅 창을 주 모니터 작업 영역의 우측 하단으로 되돌린다.
+/// 작업 영역은 작업 표시줄을 제외하므로 Windows에서는 시계 바로 위에 놓인다.
+fn recover_floating(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("floating") else {
+        return;
+    };
+    let (width, height) = {
+        let state = app.state::<AppState>();
+        let data = session::lock_data(&state.data);
+        (data.settings.floating_width, data.settings.floating_height)
+    };
+    let monitor = match win.primary_monitor() {
+        Ok(Some(monitor)) => monitor,
+        Ok(None) => {
+            eprintln!("[diligent-hours] 주 모니터를 찾을 수 없어 창 위치를 복구하지 못함");
+            return;
+        }
+        Err(e) => {
+            eprintln!("[diligent-hours] 주 모니터 조회 실패: {e}");
+            return;
+        }
+    };
+    let scale = monitor.scale_factor();
+    let physical_width = (width as f64 * scale).round() as u32;
+    let physical_height = (height as f64 * scale).round() as u32;
+    let margin = (12.0 * scale).round() as i32;
+    let area = monitor.work_area();
+    let right = area.position.x.saturating_add(area.size.width as i32);
+    let bottom = area.position.y.saturating_add(area.size.height as i32);
+    let x = right
+        .saturating_sub(physical_width as i32)
+        .saturating_sub(margin)
+        .max(area.position.x.saturating_add(margin));
+    let y = bottom
+        .saturating_sub(physical_height as i32)
+        .saturating_sub(margin)
+        .max(area.position.y.saturating_add(margin));
+
+    let _ = app.emit("recover-floating", ());
+    let _ = win.set_size(tauri::LogicalSize::new(width as f64, height as f64));
+    if let Err(e) = win.set_position(tauri::PhysicalPosition::new(x, y)) {
+        eprintln!("[diligent-hours] 플로팅 창 위치 복구 실패: {e}");
+        return;
+    }
+    let _ = win.show();
+    let _ = win.set_focus();
+
+    {
+        let state = app.state::<AppState>();
+        let mut data = session::lock_data(&state.data);
+        data.settings.floating_pos = Some((x, y));
+        session::save_settings(&data.config_dir, &data.settings);
+    }
+    persist_floating_visibility(app, true);
 }
 
 /// 플로팅 창의 클릭-스루(마우스 이벤트 무시) 상태를 적용한다.
@@ -362,11 +452,12 @@ fn open_settings_window(app: &AppHandle) {
         return;
     }
     // 설정 창: 일반 데코레이션, always-on-top 아님.
-    let result = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
-        .title("DiligentHours 설정")
-        .inner_size(440.0, 600.0)
-        .resizable(false)
-        .build();
+    let result =
+        WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+            .title("DiligentHours 설정")
+            .inner_size(440.0, 600.0)
+            .resizable(false)
+            .build();
     if let Err(e) = result {
         eprintln!("[diligent-hours] 설정 창 생성 실패: {e}");
     }

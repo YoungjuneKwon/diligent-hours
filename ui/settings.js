@@ -77,39 +77,66 @@
     return s;
   }
 
-  let feedbackTimer = null;
-  function showSavedFeedback() {
-    const fb = el("save-feedback");
-    fb.classList.add("visible");
-    if (feedbackTimer) clearTimeout(feedbackTimer);
-    feedbackTimer = setTimeout(function () {
-      fb.classList.remove("visible");
-    }, 1500);
+  let saveTimer = null;
+  let saving = false;
+  let pendingSettings = null;
+
+  async function flushSaveQueue() {
+    saveTimer = null;
+    if (saving) return;
+    saving = true;
+    while (pendingSettings) {
+      const s = pendingSettings;
+      pendingSettings = null;
+      try {
+        await invoke("set_settings", { newSettings: s });
+      } catch (e) {
+        console.error("설정 저장 실패:", e);
+      }
+    }
+    saving = false;
+
+    // 백엔드 normalize 결과를 마지막 저장이 끝난 뒤 한 번만 반영한다.
+    try {
+      const saved = await invoke("get_settings");
+      if (!pendingSettings && !saveTimer && !saving) {
+        current = saved;
+        populate(current);
+      }
+    } catch (e) {
+      console.error("저장된 설정 다시 읽기 실패:", e);
+    }
   }
 
-  async function save() {
-    const s = collect();
-    try {
-      await invoke("set_settings", { newSettings: s });
-      current = s;
-      showSavedFeedback();
-    } catch (e) {
-      console.error("설정 저장 실패:", e);
-    }
+  function scheduleSave() {
+    updateRangeLabels();
+    if (!current) return;
+    pendingSettings = collect();
+    current = pendingSettings;
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushSaveQueue, 60);
   }
 
   async function init() {
     try {
       current = await invoke("get_settings");
       populate(current);
+      const version = await invoke("get_app_version");
+      el("app-version").textContent = "v" + version;
     } catch (e) {
-      console.error("설정 로드 실패:", e);
+      console.error("설정 또는 버전 로드 실패:", e);
     }
 
-    el("opacity").addEventListener("input", updateRangeLabels);
-    el("fontSize").addEventListener("input", updateRangeLabels);
-    el("padding").addEventListener("input", updateRangeLabels);
-    el("save").addEventListener("click", save);
+    ["bg-color", "text-color", "opacity", "fontSize", "padding"].forEach(function (id) {
+      el(id).addEventListener("input", scheduleSave);
+    });
+    [
+      "hours", "minutes", "fmt-hms", "fmt-seconds", "showFloating",
+      "win-width", "win-height", "includeMouseMove", "notifyToast",
+      "notifySound", "autostart"
+    ].forEach(function (id) {
+      el(id).addEventListener("change", scheduleSave);
+    });
 
     el("manual-start").addEventListener("click", function () {
       invoke("manual_start").catch(function (e) {
@@ -142,6 +169,8 @@
 
     // 트레이 토글 등 외부 변경 반영
     await listen("settings-changed", function (event) {
+      // 자동 저장 도중의 이전 응답으로 사용자가 조절 중인 폼을 덮지 않는다.
+      if (saving || pendingSettings || saveTimer) return;
       current = event.payload;
       populate(current);
     });

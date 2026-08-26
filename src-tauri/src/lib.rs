@@ -25,6 +25,8 @@ pub struct AppState {
     pub data: Mutex<AppData>,
     /// hook 스레드가 lock 없이 읽는 "마우스 이동 트리거 인정" 플래그.
     pub include_mouse_move: Arc<AtomicBool>,
+    /// 트레이 "플로팅 창 표시" 체크 항목 핸들.
+    pub floating_item: Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>,
     /// 트레이 "워터마크 모드" 체크 항목 핸들 — 토글 시 체크 상태 동기화용.
     /// tray::build 에서 채워진다.
     pub watermark_item: Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>,
@@ -37,6 +39,7 @@ pub fn run() {
             if let Some(win) = app.get_webview_window("floating") {
                 let _ = win.show();
                 let _ = win.set_focus();
+                tray::persist_floating_visibility(app, true);
             }
         }))
         .plugin(tauri_plugin_autostart::init(
@@ -127,6 +130,7 @@ pub fn run() {
                     config_dir,
                 }),
                 include_mouse_move: include_mouse_move.clone(),
+                floating_item: Mutex::new(None),
                 watermark_item: Mutex::new(None),
             });
 
@@ -162,6 +166,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
             commands::get_settings,
+            commands::get_app_version,
             commands::set_settings,
             commands::save_floating_pos,
             commands::manual_start,

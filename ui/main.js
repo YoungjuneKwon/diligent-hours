@@ -744,6 +744,15 @@
       document.body.classList.toggle("watermark", on);
     });
 
+    await listen("recover-floating", function () {
+      // closePopover가 UP 배치 이전 좌표를 복원하지 않도록 먼저 폐기한다.
+      // 백엔드의 새 작업 영역 좌표가 이전 화면 밖 좌표로 덮이는 것을 방지한다.
+      restoreCardOrigin = null;
+      if (popoverOpen) {
+        closePopover();
+      }
+    });
+
     await listen("settings-changed", function (event) {
       settings = event.payload;
       currentSettings = settings;

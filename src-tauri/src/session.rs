@@ -510,7 +510,11 @@ pub fn set_target_time(app: &AppHandle, now: DateTime<Local>, hour: u32, minute:
         let finished_now = !was_finished && data.session.state == Phase::Finished;
         // 열려 있는 설정 창이 낡은 last_target 스냅샷을 들고 있다가 저장 시 방금
         // 기록한 값을 덮어쓰지 않도록, set_settings 와 동일하게 갱신된 설정을 브로드캐스트한다.
-        (finished_now, data.settings.notify_toast, data.settings.clone())
+        (
+            finished_now,
+            data.settings.notify_toast,
+            data.settings.clone(),
+        )
     };
     if let Err(e) = app.emit("settings-changed", &updated_settings) {
         eprintln!("[diligent-hours] settings-changed emit 실패: {e}");

@@ -1,6 +1,7 @@
 //! 프론트엔드 invoke 커맨드.
 //! 이름은 프론트엔드 invoke 문자열과 정확히 일치해야 한다:
-//! get_status / get_settings / set_settings / save_floating_pos / manual_start / manual_reset
+//! get_status / get_settings / get_app_version / set_settings / save_floating_pos /
+//! manual_start / manual_reset
 
 use std::sync::atomic::Ordering;
 
@@ -8,6 +9,7 @@ use chrono::Local;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::session::{self, Settings, StatusPayload};
+use crate::tray;
 use crate::AppState;
 
 #[tauri::command]
@@ -19,6 +21,11 @@ pub fn get_status(state: State<'_, AppState>) -> StatusPayload {
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Settings {
     session::lock_data(&state.data).settings.clone()
+}
+
+#[tauri::command]
+pub fn get_app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
 }
 
 /// 설정 저장 + 부수효과 적용 (autostart, 플로팅 표시/숨김, "settings-changed" emit).
@@ -73,6 +80,7 @@ pub fn set_settings(app: AppHandle, state: State<'_, AppState>, new_settings: Se
             let _ = win.hide();
         }
     }
+    tray::sync_floating_check(&app, new_settings.show_floating);
 
     if let Err(e) = app.emit("settings-changed", &new_settings) {
         eprintln!("[diligent-hours] settings-changed emit 실패: {e}");

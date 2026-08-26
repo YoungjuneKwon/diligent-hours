@@ -391,13 +391,6 @@ body.settings-body .range-value {
   font-variant-numeric: tabular-nums;
 }
 
-body.settings-body .actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-}
-
 body.settings-body button {
   padding: 7px 14px;
   border: 1px solid var(--border);
@@ -408,26 +401,8 @@ body.settings-body button {
   cursor: pointer;
 }
 
-body.settings-body button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
-  font-weight: 700;
-}
-
 body.settings-body button:hover {
   filter: brightness(1.05);
-}
-
-body.settings-body #save-feedback {
-  color: #16a34a;
-  font-weight: 700;
-  opacity: 0;
-  transition: opacity 0.25s ease;
-}
-
-body.settings-body #save-feedback.visible {
-  opacity: 1;
 }
 
 body.settings-body .privacy-note {
@@ -435,4 +410,11 @@ body.settings-body .privacy-note {
   font-size: 11px;
   color: var(--muted);
   line-height: 1.5;
+}
+
+body.settings-body .version-note {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
 }
