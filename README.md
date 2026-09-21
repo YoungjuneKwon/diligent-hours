@@ -6,6 +6,7 @@
 
 - **Detect**: records the first global input (mouse/keyboard) event after midnight as the work start time
 - **Countdown**: shows the time remaining until start time + the configured work duration (e.g. 9 hours)
+- **Target time**: or pick an `HH:MM` end time and it counts down the time remaining until it — for days you only start the app mid-workday
 - **Display**: tray icon or a semi-transparent floating window (seconds only / HH:MM:SS)
 - **Alert**: highlights to notify you when the remaining time reaches zero
 - **Daily reset**: once it hits zero, further input does not restart it for the same day. A new cycle begins on the first input after the date changes.
@@ -59,13 +60,14 @@ cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc
 
 ## Status
 
-- **v0.4.0 released** — [GitHub Releases](https://github.com/YoungjuneKwon/diligent-hours/releases)
+- **v0.5.0 released** — [GitHub Releases](https://github.com/YoungjuneKwon/diligent-hours/releases)
 - Added in v0.2: floating-window `⋯` popover (countdown duration, display format, set end time, minimize to tray, reset, quit app), tray-icon pie chart of remaining time, cleaned-up display format (HH:MM:SS / comma-grouped seconds)
 - Added in v0.2.1: show the popover in a position that does not cover the main window (right side by default), persist the set end time, background color / opacity controls in the settings window, reduced padding
 - Fixed in v0.2.2: the popover being pushed off-screen when the window sits at the right edge (falls back to below → above when there isn't enough room on the right), plus measuring the actual panel size
 - Added in v0.3.0: watermark (click-through) mode toggled from the tray — while on, the window passes mouse clicks/drags through to the apps behind it (like a non-interactive watermark), and cannot be dragged or clicked; turn it off from the tray to interact again
 - Added in v0.3.1: adjustable window size, text color, and padding in the settings window (in addition to background color, opacity, and font size) — all persisted
 - Added in v0.4.0: recover an off-screen floating window above the system clock, checked floating-window visibility in the tray, instant settings application, and installed version display
+- Added in v0.5.0: "target time" manual control in the settings window — pick an `HH:MM` and the countdown is set to the time remaining until it (instead of now + work duration), which is what you want when the app was started in the middle of the workday; the value is persisted and pre-filled, and a hint shows how much time is left before you apply it
 
 ## License
 
