@@ -1,6 +1,6 @@
 [package]
 name = "diligent-hours"
-version = "0.5.0"
+version = "0.5.1"
 description = "DiligentHours — 첫 입력 감지 기반 근무시간 카운트다운"
 edition = "2021"
 
@@ -19,6 +19,9 @@ tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
+
+# Windows 는 주입 입력(INJECTED) 판별을 위해 저수준 훅을 직접 건다(hook.rs). rdev 는 그 외 플랫폼만.
+[target.'cfg(not(windows))'.dependencies]
 rdev = "0.5"
 
 [profile.release]

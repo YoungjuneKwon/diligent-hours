@@ -15,7 +15,7 @@
 
 - **[Tauri v2](https://tauri.app/)** — Rust backend + the OS's built-in WebView. Its small binary/memory footprint suits a tray-resident app.
 - **Rust** — core logic: state machine, countdown, persistence
-- **[rdev](https://crates.io/crates/rdev)** — global keyboard/mouse input detection (Windows: `SetWindowsHookEx`, macOS: `CGEventTap`)
+- **Global input detection** — Windows: its own low-level `SetWindowsHookEx` hook (so injected input can be told apart); macOS: [rdev](https://crates.io/crates/rdev) (`CGEventTap`)
 - **vanilla HTML/CSS/JS** — static UI, no bundler/Node build (`withGlobalTauri`)
 - Target platforms: **Windows (primary)**, **macOS (secondary)**
 
@@ -60,7 +60,7 @@ cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc
 
 ## Status
 
-- **v0.5.0 released** — [GitHub Releases](https://github.com/YoungjuneKwon/diligent-hours/releases)
+- **v0.5.1 released** — [GitHub Releases](https://github.com/YoungjuneKwon/diligent-hours/releases)
 - Added in v0.2: floating-window `⋯` popover (countdown duration, display format, set end time, minimize to tray, reset, quit app), tray-icon pie chart of remaining time, cleaned-up display format (HH:MM:SS / comma-grouped seconds)
 - Added in v0.2.1: show the popover in a position that does not cover the main window (right side by default), persist the set end time, background color / opacity controls in the settings window, reduced padding
 - Fixed in v0.2.2: the popover being pushed off-screen when the window sits at the right edge (falls back to below → above when there isn't enough room on the right), plus measuring the actual panel size
@@ -68,6 +68,7 @@ cargo tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc
 - Added in v0.3.1: adjustable window size, text color, and padding in the settings window (in addition to background color, opacity, and font size) — all persisted
 - Added in v0.4.0: recover an off-screen floating window above the system clock, checked floating-window visibility in the tray, instant settings application, and installed version display
 - Added in v0.5.0: "target time" manual control in the settings window — pick an `HH:MM` and the countdown is set to the time remaining until it (instead of now + work duration), which is what you want when the app was started in the middle of the workday; the value is persisted and pre-filled, and a hint shows how much time is left before you apply it
+- Fixed in v0.5.1 (Windows): input injected by programs (`SendInput`, e.g. anti-idle scripts that nudge the mouse while the screen is locked) no longer starts the workday — previously such input right after midnight started the countdown at ~00:0x. Remote-desktop input is also classified as injected, so use "Start now" on days you start remotely
 
 ## License
 
